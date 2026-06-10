@@ -16,7 +16,10 @@ dependencies = [
 
 [project.optional-dependencies]
 flink = ["apache-flink>=1.20", "cffi"]
-cluster = ["daft", "trafilatura", "fasttext-wheel", "vllm"]
+# cluster profile (Daft/Ray, trafilatura, fastText, vLLM) 依赖重且需 GPU,
+# 不进 uv.lock, 按需手动安装: uv pip install daft trafilatura fasttext-wheel vllm
+
+[dependency-groups]
 dev = ["pytest>=7"]
 
 [project.scripts]

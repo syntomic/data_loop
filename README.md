@@ -230,26 +230,26 @@ data-loop/
 ## 11. 快速开始 (mini profile)
 
 ```bash
-pip install -e ".[dev]"
+uv sync                       # 创建 .venv 并按 uv.lock 安装 (dev 组默认包含)
 
 # 全链 9 模块端到端 (自动生成模拟 WARC + 事件流)
-python scripts/run_mini.py
+uv run python scripts/run_mini.py
 
 # 单元 + 端到端测试
-python -m pytest -q
+uv run pytest -q
 
 # M7 用 PyFlink MiniCluster 跑 (默认纯 Python replay, 两后端输出逐行一致)
-pip install -e ".[flink]"   # 需 Java 17+
+uv sync --extra flink         # 需 Java 17+
 # configs/mini.yaml: m7_signal_ingest.backend: flink
-python -m pytest -q tests/test_m7_flink.py   # 一致性校验
+uv run pytest -q tests/test_m7_flink.py   # 一致性校验
 
 # registry 查询
-python -m registry.cli versions
-python -m registry.cli ablations
-python -m registry.cli trace --kind pair --id <pair_id>
+uv run python -m registry.cli versions
+uv run python -m registry.cli ablations
+uv run python -m registry.cli trace --kind pair --id <pair_id>
 ```
 
 mini profile 的外部模型组件(fastText langid / trafilatura / BGE-zh / vLLM /
 教师与裁判模型)全部走可插拔适配层,默认用确定性的纯 Python mock,接口与
 cluster profile 对齐;切到 cluster 只需替换 `configs/cluster.yaml` 中的后端
-并安装 `pip install -e ".[cluster]"`。
+并安装重型依赖 `uv pip install daft trafilatura fasttext-wheel vllm`(不入 lock)。
