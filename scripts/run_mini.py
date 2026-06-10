@@ -23,7 +23,10 @@ def main():
     from offline.m4_quality import score as m4
     from offline.m5_corpus import build as m5
     from ablation import run as m6
-    from online.m7_flink import job as m7
+    if cfg["m7_signal_ingest"].get("backend") == "flink":
+        from online.m7_flink import job_flink as m7
+    else:
+        from online.m7_flink import job as m7
     from online.m8_pref import pipeline as m8
 
     ingest.run(cfg)

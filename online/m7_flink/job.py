@@ -53,7 +53,8 @@ def run(cfg: dict) -> Path:
                 continue  # 无 state / TTL 过期
             if ev["ts"] > tgt["timer"] + m["allowed_lateness_ms"]:
                 continue  # 超出 allowed lateness, 丢弃 (无论 timer 是否已触发)
-            late = key in fired
+            # timer 在 watermark = ts - 5min 越过时已触发 → 此反馈算迟到
+            late = ev["ts"] - m["watermark_ms"] >= tgt["timer"]
             sig = ev["signal"]
             if sig == "thumbs_up":
                 tgt["thumbs"] = 1

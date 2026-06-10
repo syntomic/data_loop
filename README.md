@@ -238,6 +238,11 @@ python scripts/run_mini.py
 # 单元 + 端到端测试
 python -m pytest -q
 
+# M7 用 PyFlink MiniCluster 跑 (默认纯 Python replay, 两后端输出逐行一致)
+pip install -e ".[flink]"   # 需 Java 17+
+# configs/mini.yaml: m7_signal_ingest.backend: flink
+python -m pytest -q tests/test_m7_flink.py   # 一致性校验
+
 # registry 查询
 python -m registry.cli versions
 python -m registry.cli ablations

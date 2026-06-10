@@ -23,6 +23,24 @@ jobs:
       - name: Unit + e2e tests
         run: python -m pytest -q
 
+  flink-parity:
+    # M7 PyFlink 后端与 replay 后端输出一致性 (依赖较重, 单独 job)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install
+        run: pip install -e ".[dev,flink]"
+      - name: Parity test
+        run: python -m pytest -q tests/test_m7_flink.py
+
   mini-pipeline:
     # README §7 验收: mini profile 全链 9 模块端到端跑通
     runs-on: ubuntu-latest

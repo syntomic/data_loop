@@ -41,6 +41,7 @@ m6_ablation:
   seed: 42
 
 m7_signal_ingest:
+  backend: replay          # replay | flink (PyFlink MiniCluster, 语义一致, 见 job_flink.py)
   message_events: replay-data/message_events.jsonl
   feedback_events: replay-data/feedback_events.jsonl
   consent_table: replay-data/consent.jsonl
