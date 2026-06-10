@@ -1,0 +1,40 @@
+name: Release
+
+# 平台产出物是数据集而非服务: 打 tag 即跑 mini 全链并把
+# corpus manifest / 偏好数据集 / registry 附到 GitHub Release。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release-datasets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Tests
+        run: python -m pytest -q
+      - name: Run mini pipeline
+        run: python scripts/run_mini.py | tee mini-run.log
+      - name: Bundle datasets
+        run: |
+          tar czf corpus-${{ github.ref_name }}.tar.gz data/corpus
+          tar czf pref-${{ github.ref_name }}.tar.gz data/preference_pair data/rlhf_example data/human_queue
+          cp data/registry.sqlite registry-${{ github.ref_name }}.sqlite
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            corpus-${{ github.ref_name }}.tar.gz
+            pref-${{ github.ref_name }}.tar.gz
+            registry-${{ github.ref_name }}.sqlite
+            mini-run.log
+          generate_release_notes: true
