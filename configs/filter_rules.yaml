@@ -1,0 +1,9 @@
+# M2 启发式规则 (README §3.2), 每条规则单独记 flag, 消融可单独开关
+min_chars: 200
+max_chars: 100000
+max_symbol_ratio: 0.25
+max_digit_ratio: 0.3
+max_dup_line_ratio: 0.3
+max_dup_2gram_ratio: 0.2
+min_zh_char_ratio: 0.6
+min_stopword_kinds: 2

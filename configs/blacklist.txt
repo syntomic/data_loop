@@ -1,0 +1,4 @@
+# 域名级黑名单: 内容农场 / SEO 站, 每行一个域名
+seo-farm.example.com
+spam-content.example.cn
+clickbait.example.net

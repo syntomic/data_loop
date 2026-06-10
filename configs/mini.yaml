@@ -1,0 +1,60 @@
+# mini profile: 单机端到端 (README §7)
+profile: mini
+data_root: data            # 所有湖表落在 <repo>/data 下的 Parquet 分区目录
+registry_db: data/registry.sqlite
+
+m1_warc_ingest:
+  warc_glob: "replay-data/warc/*.warc.gz"
+  dump_id: CC-MAIN-2026-18
+  extractor: simple        # mini 用内置正则抽取器; cluster 用 trafilatura+resiliparse
+
+m2_filter:
+  rules_file: configs/filter_rules.yaml
+  blacklist_file: configs/blacklist.txt
+  stopwords_file: configs/stopwords_zh.txt
+  langid: heuristic        # mini 用 CJK 占比启发式; cluster 用 fastText lid.176
+  zh_conf_min: 0.65
+
+m3_dedup:
+  scope: per_dump          # 消融项: per_dump | global
+  ngram: 5                 # 字粒度 5-gram
+  num_perm: 112
+  bands: 14
+  rows: 8
+
+m4_quality:
+  teacher: heuristic       # mini 用启发式教师; cluster 走外部强模型 API
+  teacher_sample: 200
+  embedding: hashing       # mini 用 char-ngram hashing; cluster 用 BGE-zh
+  embedding_dim: 256
+  classifier_version: bge-zh-reg-v0.1-mini
+
+m5_corpus:
+  stable_threshold: 3.0
+  anneal_threshold: 4.2
+  shard_tokens: 200000
+  tokenizer: char          # mini 用字符级; cluster 用真实 tokenizer
+
+m6_ablation:
+  decision: dedup_scope    # per_dump vs global
+  proxy_tokens: 5000       # mini 不真训, 用代理评估
+  seed: 42
+
+m7_signal_ingest:
+  message_events: replay-data/message_events.jsonl
+  feedback_events: replay-data/feedback_events.jsonl
+  consent_table: replay-data/consent.jsonl
+  watermark_ms: 300000     # 5min
+  allowed_lateness_ms: 1800000  # 30min
+  state_ttl_ms: 86400000   # 24h
+
+m8_pref:
+  judge: mock              # mini 走与 vLLM 对齐的 mock 适配层
+  generator: mock
+  judge_conf_auto: 0.8
+  cluster_quota: 20
+  reward_min: 0.0
+
+decontam:
+  eval_file: configs/eval_suite_zh.txt
+  ngram: 13

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+replay-data/warc/
+replay-data/*.jsonl
+*.egg-info/

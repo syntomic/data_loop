@@ -1,0 +1,14 @@
+# cluster profile: 占位配置, 接口与 mini 对齐 (README §7)
+profile: cluster
+data_root: s3://data-loop/lake     # Paimon on OSS/S3
+registry_db: postgresql://registry
+
+m1_warc_ingest: {warc_glob: "s3://cc/CC-MAIN-2026-18/*.warc.gz", dump_id: CC-MAIN-2026-18, extractor: trafilatura}
+m2_filter: {rules_file: configs/filter_rules.yaml, blacklist_file: configs/blacklist.txt, stopwords_file: configs/stopwords_zh.txt, langid: fasttext, zh_conf_min: 0.65}
+m3_dedup: {scope: per_dump, ngram: 5, num_perm: 112, bands: 14, rows: 8}
+m4_quality: {teacher: api, teacher_sample: 500000, embedding: bge-zh, embedding_dim: 768, classifier_version: bge-zh-reg-v1}
+m5_corpus: {stable_threshold: 3.0, anneal_threshold: 4.2, shard_tokens: 100000000, tokenizer: bpe}
+m6_ablation: {decision: dedup_scope, model_size: 0.2B, train_tokens: 5000000000, seed: 42}
+m7_signal_ingest: {kafka: "kafka:9092", watermark_ms: 300000, allowed_lateness_ms: 1800000, state_ttl_ms: 86400000}
+m8_pref: {judge: vllm, generator: vllm, judge_conf_auto: 0.8, cluster_quota: 2000, reward_min: 0.0}
+decontam: {eval_file: configs/eval_suite_zh.txt, ngram: 13}

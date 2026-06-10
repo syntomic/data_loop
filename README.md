@@ -223,4 +223,28 @@ data-loop/
 - **教师打标质量(中文 rubric 偏置)** → 双教师交叉抽检 + 人审 5% 校准。
 - **裁判漂移** → 每版数据抽 2% 人审,Cohen's κ < 0.7 触发裁判回滚。
 - **去污染遗漏** → 注册前强制检查,无 decontam 记录拒绝注册。
-- **本地推理瓶颈** → judge/strong_model 在 mini profile 走外部 API 适配层,接口与 vLLM 对齐。**
+- **本地推理瓶颈** → judge/strong_model 在 mini profile 走外部 API 适配层,接口与 vLLM 对齐。
+
+---
+
+## 11. 快速开始 (mini profile)
+
+```bash
+pip install -e ".[dev]"
+
+# 全链 9 模块端到端 (自动生成模拟 WARC + 事件流)
+python scripts/run_mini.py
+
+# 单元 + 端到端测试
+python -m pytest -q
+
+# registry 查询
+python -m registry.cli versions
+python -m registry.cli ablations
+python -m registry.cli trace --kind pair --id <pair_id>
+```
+
+mini profile 的外部模型组件(fastText langid / trafilatura / BGE-zh / vLLM /
+教师与裁判模型)全部走可插拔适配层,默认用确定性的纯 Python mock,接口与
+cluster profile 对齐;切到 cluster 只需替换 `configs/cluster.yaml` 中的后端
+并安装 `pip install -e ".[cluster]"`。

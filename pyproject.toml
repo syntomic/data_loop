@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-loop"
+version = "0.1.0"
+description = "LLM 训练数据闭环平台 (offline + online + loop infra), mini profile"
+requires-python = ">=3.10"
+dependencies = [
+    "pyarrow>=14",
+    "numpy>=1.24",
+    "PyYAML>=6",
+    "warcio>=1.7",
+]
+
+[project.optional-dependencies]
+cluster = ["daft", "trafilatura", "fasttext-wheel", "vllm"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+dataloop-registry = "registry.cli:main"
+dataloop-mini = "scripts.run_mini:main"
+
+[tool.setuptools.packages.find]
+include = ["common*", "schemas*", "offline*", "ablation*", "online*", "registry*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
