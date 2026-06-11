@@ -278,6 +278,9 @@ uv run pytest -q
 uv run python -m registry.cli versions
 uv run python -m registry.cli ablations
 uv run python -m registry.cli trace --kind pair --id <pair_id>
+
+# 可视化 Demo (浏览器看数据流转, 详见 webapp/README.md)
+uv run python -m webapp.server          # http://127.0.0.1:8000
 ```
 
 > M7 默认后端是 Flink MiniCluster(`configs/mini.yaml` 的

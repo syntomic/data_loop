@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>data-loop · 训练数据闭环可视化</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3240;
+    --text:#e6edf3; --muted:#8b949e; --offline:#58a6ff; --online:#3fb950;
+    --loop:#d29922; --edge:#3a4150; --accent:#bc8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--text);font-size:14px}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0;font-weight:600}
+  header .sub{color:var(--muted);font-size:12.5px}
+  header .legend{margin-left:auto;display:flex;gap:14px;font-size:12px;color:var(--muted)}
+  header .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .layout{display:grid;grid-template-columns:1fr 360px;gap:0;height:calc(100vh - 56px)}
+  .stage{position:relative;overflow:hidden}
+  svg{width:100%;height:100%;display:block}
+  .side{border-left:1px solid var(--line);background:var(--panel);overflow-y:auto}
+  .tabs{display:flex;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
+  .tabs button{flex:1;background:none;border:none;color:var(--muted);padding:11px 6px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+  .tabs button.active{color:var(--text);border-bottom-color:var(--accent)}
+  .tabpane{padding:14px 16px;display:none}
+  .tabpane.active{display:block}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}
+  .card h3{margin:0 0 8px;font-size:13.5px;display:flex;justify-content:space-between;align-items:center}
+  .tag{font-size:11px;color:var(--muted);background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:1px 8px}
+  .kv{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #232a35;font-size:12.5px}
+  .kv:last-child{border-bottom:none}
+  .kv span:first-child{color:var(--muted)}
+  .snap{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--online);word-break:break-all}
+  .snap .role{display:inline-block;min-width:54px;color:var(--loop)}
+  table.sample{width:100%;border-collapse:collapse;font-size:11px;font-family:ui-monospace,Menlo,monospace}
+  table.sample th{text-align:left;color:var(--muted);border-bottom:1px solid var(--line);padding:4px 6px;position:sticky;top:0;background:var(--panel2)}
+  table.sample td{padding:3px 6px;border-bottom:1px solid #1f2530;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .muted{color:var(--muted)}
+  .btn{background:#21262d;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px}
+  .btn:hover{border-color:var(--accent)}
+  .lin-node{padding:6px 10px;border-radius:6px;background:#0d1117;border:1px solid var(--line);margin:4px 0;font-family:ui-monospace,monospace;font-size:11.5px}
+  .lin-arrow{color:var(--muted);text-align:center;font-size:11px}
+  select,input{background:#0d1117;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px}
+  /* SVG node */
+  .node rect{rx:9;transition:filter .2s}
+  .node:hover rect{filter:brightness(1.25)}
+  .node.sel rect{stroke-width:2.4}
+  .node text{fill:var(--text);font-size:12.5px}
+  .node .mid{font-weight:600;font-size:13px}
+  .node .metric{font-size:19px;font-weight:700}
+  .node .unit{fill:var(--muted);font-size:10.5px}
+  .node .mod{fill:var(--muted);font-size:10px;letter-spacing:.5px}
+  .lane-label{fill:var(--muted);font-size:11px;letter-spacing:1px;text-transform:uppercase}
+  .edge{fill:none;stroke:var(--edge);stroke-width:1.6}
+  .edge.loop{stroke:var(--loop);stroke-dasharray:5 4;opacity:.55}
+  .flow{fill:#fff}
+  .toolbar{position:absolute;left:14px;bottom:14px;display:flex;gap:8px;align-items:center;background:rgba(22,27,34,.85);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>data-loop</h1>
+  <span class="sub">LLM 训练数据闭环 · 实时数据流转(读取真实 mini-run 产物)</span>
+  <div class="legend">
+    <span><i style="background:var(--offline)"></i>离线管线</span>
+    <span><i style="background:var(--online)"></i>在线管线</span>
+    <span><i style="background:var(--loop)"></i>闭环基础设施</span>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="stage">
+    <svg id="svg" viewBox="0 0 960 620" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="toolbar">
+      <button class="btn" id="flowBtn">⏸ 暂停流动</button>
+      <button class="btn" id="reloadBtn">↻ 刷新数据</button>
+      <span class="muted" id="status">加载中…</span>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="tabs">
+      <button data-tab="node" class="active">节点</button>
+      <button data-tab="registry">版本/快照</button>
+      <button data-tab="lineage">血缘</button>
+    </div>
+
+    <div class="tabpane active" id="tab-node">
+      <div class="muted" style="font-size:12.5px">点击左侧任一模块查看 schema、抽样行与 Lance 物理版本。</div>
+      <div id="nodeDetail"></div>
+    </div>
+
+    <div class="tabpane" id="tab-registry">
+      <div id="registryDetail" class="muted">加载中…</div>
+    </div>
+
+    <div class="tabpane" id="tab-lineage">
+      <div class="card">
+        <h3>血缘反查 <span class="tag">trace</span></h3>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <select id="linKind">
+            <option value="pair">偏好对 pair</option>
+            <option value="doc">文档 doc</option>
+          </select>
+          <input id="linId" placeholder="id" style="flex:1">
+          <button class="btn" id="linBtn">反查</button>
+        </div>
+        <div class="muted" style="font-size:12px">偏好对 → turn;文档 → WARC 偏移。起点已用真实样本预填。</div>
+      </div>
+      <div id="lineageResult"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const LANES = {offline:{y:90,color:'var(--offline)',label:'OFFLINE  CC WARC → 分层语料'},
+               online:{y:300,color:'var(--online)',label:'ONLINE  反馈信号 → 偏好数据'},
+               loop:{y:500,color:'var(--loop)',label:'LOOP  消融 · 注册 · 血缘 · 去污染'}};
+const POS = {  // 节点中心坐标
+  M1:[110,140],M2:[290,140],M3:[470,140],M4:[650,140],M5:[830,140],
+  M7:[110,350],M8:[400,350],
+  M6:[650,540],M9:[830,540]
+};
+const NW=150,NH=88;
+let DATA=null, SEL=null, flowing=true;
+
+const svg=document.getElementById('svg');
+const NS='http://www.w3.org/2000/svg';
+function el(t,a={}){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+function laneColor(l){return l==='offline'?'#58a6ff':l==='online'?'#3fb950':'#d29922';}
+
+async function api(p){const r=await fetch(p);if(!r.ok)throw new Error((await r.json()).error||r.status);return r.json();}
+
+function edgePath(a,b){
+  const [x1,y1]=POS[a],[x2,y2]=POS[b];
+  if(y1===y2) return `M${x1+NW/2},${y1} L${x2-NW/2},${y2}`;       // 同泳道水平
+  const my=(y1+y2)/2;
+  return `M${x1},${y1+NH/2} C${x1},${my} ${x2},${my} ${x2},${y2-NH/2}`; // 跨泳道竖向贝塞尔
+}
+
+function render(){
+  svg.innerHTML='';
+  // lane backgrounds + labels
+  for(const k in LANES){const L=LANES[k];
+    svg.appendChild(el('text',{x:24,y:L.y-44,class:'lane-label'})).textContent=L.label;
+  }
+  // edges
+  const edgeLayer=el('g'); svg.appendChild(edgeLayer);
+  const flowLayer=el('g'); svg.appendChild(flowLayer);
+  DATA.edges.forEach(e=>{
+    if(!POS[e.from]||!POS[e.to])return;
+    const loop=(e.from==='M6'&&e.to==='M2')||(e.from==='M8'&&e.to==='M7');
+    const p=el('path',{d:edgePath(e.from,e.to),class:'edge'+(loop?' loop':'')});
+    edgeLayer.appendChild(p);
+    if(!loop){ // 在主链路上放流动粒子
+      for(let i=0;i<2;i++){
+        const dot=el('circle',{r:3,class:'flow'});
+        const am=el('animateMotion',{dur:(2.6+Math.random()).toFixed(2)+'s',repeatCount:'indefinite',
+          begin:(i*1.3).toFixed(2)+'s',path:edgePath(e.from,e.to),rotate:'0'});
+        dot.appendChild(am); flowLayer.appendChild(dot); dot.dataset.flow='1';
+      }
+    }
+  });
+  // nodes
+  DATA.nodes.forEach(n=>{
+    const [cx,cy]=POS[n.id]||[0,0];
+    const g=el('g',{class:'node',transform:`translate(${cx-NW/2},${cy-NH/2})`});
+    g.style.cursor='pointer';
+    g.appendChild(el('rect',{width:NW,height:NH,rx:9,fill:'var(--panel2)',
+      stroke:laneColor(n.lane),'stroke-opacity':.9}));
+    const mod=el('text',{x:12,y:18,class:'mod'});mod.textContent=n.id+' · '+n.name;g.appendChild(mod);
+    const metric=el('text',{x:12,y:46,class:'metric',fill:laneColor(n.lane)});metric.textContent=n.metric;g.appendChild(metric);
+    const unit=el('text',{x:12,y:62,class:'unit'});unit.textContent=n.unit;g.appendChild(unit);
+    const stack=el('text',{x:12,y:80,class:'unit'});stack.textContent=(n.stack||'').slice(0,30);g.appendChild(stack);
+    if(n.version!=null){const v=el('text',{x:NW-10,y:18,class:'unit','text-anchor':'end',fill:'var(--accent)'});
+      v.textContent='@v'+n.version;g.appendChild(v);}
+    g.onclick=()=>selectNode(n);
+    if(SEL===n.id)g.classList.add('sel');
+    svg.appendChild(g);
+  });
+  applyFlow();
+}
+
+function applyFlow(){ if(flowing) svg.unpauseAnimations(); else svg.pauseAnimations(); }
+
+async function selectNode(n){
+  SEL=n.id; render();
+  switchTab('node');
+  const box=document.getElementById('nodeDetail');
+  box.innerHTML=`<div class="card"><h3>${n.id} · ${n.name}
+      <span class="tag">${n.lane}</span></h3>
+      <div class="kv"><span>技术栈</span><span>${n.stack||'—'}</span></div>
+      <div class="kv"><span>指标</span><span>${n.metric} ${n.unit}</span></div>
+      ${n.version!=null?`<div class="kv"><span>Lance 版本</span><span class="snap">@v${n.version}</span></div>`:''}
+      ${n.detail?`<div class="kv"><span>明细</span><span>${escapeHtml(JSON.stringify(n.detail))}</span></div>`:''}
+    </div>`;
+  if(n.table){
+    box.innerHTML+=`<div class="card" id="tblCard"><h3>表 ${n.table}
+        <span class="tag" id="tblVer">…</span></h3><div id="tblBody" class="muted">加载抽样…</div></div>`;
+    try{
+      const t=await api('/api/table/'+n.table);
+      document.getElementById('tblVer').textContent='@v'+t.version+' · '+t.count+' 行';
+      document.getElementById('tblBody').innerHTML=renderSample(t);
+    }catch(e){document.getElementById('tblBody').textContent='无数据(先跑 run_mini)';}
+  }
+}
+
+function renderSample(t){
+  if(!t.sample.length)return '<span class="muted">空表</span>';
+  const cols=t.schema.slice(0,5);
+  let h='<div style="overflow-x:auto"><table class="sample"><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr>';
+  t.sample.slice(0,6).forEach(r=>{h+='<tr>'+cols.map(c=>`<td title="${escapeHtml(String(r[c]))}">${escapeHtml(String(r[c]))}</td>`).join('')+'</tr>';});
+  return h+'</table></div><div class="muted" style="margin-top:6px;font-size:11px">'+t.schema.length+' 列 · 抽样前 6 行</div>';
+}
+
+async function loadRegistry(){
+  const box=document.getElementById('registryDetail');
+  try{
+    const r=await api('/api/registry');
+    let h='';
+    r.versions.forEach(v=>{
+      h+=`<div class="card"><h3>${v.version_id}<span class="tag">${v.kind}</span></h3>`;
+      const m=v.manifest;
+      Object.keys(m).slice(0,4).forEach(k=>{h+=`<div class="kv"><span>${k}</span><span>${escapeHtml(String(m[k]))}</span></div>`;});
+      if(v.snapshots.length){h+='<div style="margin-top:8px">';
+        v.snapshots.forEach(s=>{h+=`<div class="snap"><span class="role">${s.role}</span>${s.table_name} @v${s.lance_version}</div>`;});
+        h+='</div>';}
+      h+='</div>';
+    });
+    h+='<div class="card"><h3>消融报告 <span class="tag">M6</span></h3>';
+    r.ablation.forEach(a=>{h+=`<div class="kv"><span>${a.decision_id}</span><span>${a.significant?'显著':'无显著差异'}</span></div>
+       <div class="kv"><span>score a/b</span><span>${a.score_a} / ${a.score_b}</span></div>
+       <div class="muted" style="font-size:12px;margin:4px 0">${escapeHtml(a.conclusion)}</div>`;
+      a.snapshots.forEach(s=>{h+=`<div class="snap"><span class="role">${s.role}</span>${s.table_name} @v${s.lance_version}</div>`;});});
+    h+='</div>';
+    h+='<div class="card"><h3>去污染 <span class="tag">decontam_log</span></h3>';
+    r.decontam.forEach(d=>{h+=`<div class="kv"><span>${d.version_id}</span><span>${d.records} 条</span></div>`;});
+    h+='</div>';
+    box.innerHTML=h;
+  }catch(e){box.textContent='加载失败: '+e.message;}
+}
+
+async function runLineage(){
+  const kind=document.getElementById('linKind').value;
+  const id=document.getElementById('linId').value.trim();
+  const box=document.getElementById('lineageResult');
+  if(!id){box.innerHTML='<div class="muted">请输入 id</div>';return;}
+  try{
+    const r=await api('/api/lineage/'+kind+'/'+encodeURIComponent(id));
+    let h=`<div class="lin-node" style="border-color:var(--accent)">${r.root.kind} · ${escapeHtml(r.root.id)}</div>`;
+    if(!r.edges.length)h+='<div class="muted" style="margin-top:8px">无上游血缘</div>';
+    r.edges.forEach(e=>{h+='<div class="lin-arrow">↓</div><div class="lin-node">'+e.parent_kind+' · '+escapeHtml(e.parent_id)+'</div>';});
+    box.innerHTML=h;
+  }catch(e){box.innerHTML='<div class="muted">'+e.message+'</div>';}
+}
+
+function switchTab(t){
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
+  document.querySelectorAll('.tabpane').forEach(p=>p.classList.toggle('active',p.id==='tab-'+t));
+  if(t==='registry')loadRegistry();
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+document.getElementById('linBtn').onclick=runLineage;
+document.getElementById('flowBtn').onclick=()=>{flowing=!flowing;
+  document.getElementById('flowBtn').textContent=flowing?'⏸ 暂停流动':'▶ 开始流动';applyFlow();};
+document.getElementById('reloadBtn').onclick=load;
+
+function escapeHtml(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+async function load(){
+  document.getElementById('status').textContent='加载中…';
+  try{
+    DATA=await api('/api/pipeline'); render();
+    const ids=await api('/api/sample-ids');
+    if(ids.pair){document.getElementById('linKind').value='pair';document.getElementById('linId').value=ids.pair;}
+    window._ids=ids;
+    document.getElementById('status').textContent='已加载 · '+DATA.nodes.reduce((s,n)=>s+(typeof n.metric==='number'?n.metric:0),0)+' 条记录流经管线';
+  }catch(e){document.getElementById('status').textContent='错误: '+e.message+'(先 uv run python scripts/run_mini.py)';}
+}
+document.getElementById('linKind').onchange=e=>{
+  const ids=window._ids||{};document.getElementById('linId').value=e.target.value==='doc'?(ids.doc||''):(ids.pair||'');};
+load();
+</script>
+</body>
+</html>
