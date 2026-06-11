@@ -28,10 +28,9 @@ dependencies = [
 # 不随 mini 默认安装: uv sync --extra cluster (GPU 节点上再装 vllm/fasttext)
 cluster = [
     "ray",                  # Daft Ray runner
-    "pypaimon",             # Paimon 湖表
     "psycopg[binary]",      # Postgres registry
     "openai",               # vLLM / 强模型 / 裁判 (OpenAI 兼容客户端)
-    "fsspec",               # 对象存储 (corpus shard)
+    "fsspec",               # 对象存储 (corpus shard 文本)
     "s3fs",
 ]
 

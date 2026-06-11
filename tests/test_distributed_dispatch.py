@@ -1,6 +1,6 @@
 """验证「切分布式只改配置」: 同一份模块代码按 cfg 选后端。
 
-用假后端 (monkeypatch) 替掉真实 Paimon/Postgres/vLLM, 证明 cluster 配置
+用假后端 (monkeypatch) 替掉真实 Postgres/vLLM, 证明 cluster 配置
 路由到分布式实现, 无需真实集群/GPU。
 """
 import sys
@@ -17,7 +17,7 @@ from registry.db import registry_dsn
 
 def test_cluster_profile_loads_and_selects_backends():
     cfg = load_profile("configs/cluster.yaml")   # runner=ray 缺失时被静默忽略
-    assert cfg["storage"] == "paimon"
+    assert cfg["storage"] == "lance"             # 本地/分布式统一 Lance, 仅 data_root 不同
     assert Lake(cfg).uri("doc_raw") == "s3://data-loop/lake/doc_raw"
     assert cfg["m7_signal_ingest"]["source"] == "kafka"
     assert cfg["m8_pref"]["judge"] == "vllm" and cfg["m8_pref"]["generator"] == "vllm"
@@ -30,28 +30,29 @@ def test_registry_dsn_dispatch(tmp_path):
     assert registry_dsn(cluster).startswith("postgresql://")
 
 
-def test_storage_paimon_roundtrip_via_fake(monkeypatch):
-    """storage=paimon 时 Lake 走 daft.write_paimon/read_paimon (此处用假后端)。"""
-    store = {}
+def test_storage_options_threaded_to_lance(monkeypatch):
+    """data_root 为对象存储 URI 时, Lake 把 storage_options 透传给 Lance。"""
+    captured = {}
 
-    def fake_paimon_table(cfg, name, schema=None, partition=None, create=False):
-        return name
+    def fake_write(rows, schema, uri, storage_options=None):
+        captured["uri"], captured["opts"] = uri, storage_options
+    monkeypatch.setattr("common.io.write_table", fake_write)
 
-    class FakeDF:
-        def __init__(self, table): self.table = table
-        def write_paimon(self, table, mode="append"): store[table] = self.table
+    cfg = {"data_root": "s3://bucket/lake", "storage_options": {"region": "cn-hangzhou"}}
+    schema = pa.schema([("a", pa.int64())])
+    Lake(cfg).write("doc_raw", [{"a": 1}], schema)
+    assert captured["uri"] == "s3://bucket/lake/doc_raw"
+    assert captured["opts"] == {"region": "cn-hangzhou"}
 
-    fake_daft = types.ModuleType("daft")
-    fake_daft.from_arrow = lambda t: FakeDF(t)
-    fake_daft.read_paimon = lambda name: types.SimpleNamespace(to_pylist=lambda: store[name].to_pylist())
-    monkeypatch.setitem(sys.modules, "daft", fake_daft)
-    monkeypatch.setitem(sys.modules, "common.paimon", types.SimpleNamespace(paimon_table=fake_paimon_table))
 
-    cfg = {"storage": "paimon", "data_root": "s3://bucket/lake", "_root": "."}
+def test_lance_local_roundtrip(tmp_path):
+    """同一 Lance 代码路径用于本地目录。"""
     schema = pa.schema([("a", pa.int64()), ("b", pa.string())])
     rows = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
+    cfg = {"data_root": str(tmp_path), "_root": str(tmp_path)}
     Lake(cfg).write("t", rows, schema)
     assert Lake(cfg).read("t") == rows
+    assert Lake(cfg).read("missing") == []
 
 
 def test_m8_generator_dispatch(monkeypatch):

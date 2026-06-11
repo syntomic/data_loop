@@ -21,7 +21,7 @@
 
 - **评估优先**: 任何过滤/配比决策必须可被消融实验或退火评估验证,杜绝拍脑袋规则。
 - **分层产出**: 质量分类输出连续分数,同一管线用双阈值切出 stable / anneal 两层,不做单一 pass/fail。
-- **流批分离**: 有状态的事件关联归 Flink,GPU 密集批推理归 Daft+vLLM,湖表(Paimon/Iceberg)解耦,互不阻塞。
+- **流批分离**: 有状态的事件关联归 Flink,GPU 密集批推理归 Daft+vLLM,湖表(Lance)解耦,互不阻塞。
 - **血缘贯穿**: 每条样本可反查来源(WARC 偏移 / conversation_id),每个数据集版本可复现。
 - **本地可跑**: 全链路提供 mini profile,可在单机(64GB 内存,Apple Silicon)上以缩样数据端到端跑通。
 
@@ -60,7 +60,7 @@
 | M8 | pref-build | Daft, vLLM, judge | PreferencePair 数据集 |
 | M9 | registry | 元数据库 (SQLite/PG) | 版本、血缘、去污染记录 |
 
-数据层统一为 Lakehouse(本地 mini profile 用 Lance 数据集;集群 profile 用 Paimon)。
+数据层统一为 Lakehouse:本地与集群都用 Lance 数据集,只是 `data_root` 从本地目录换成对象存储 URI(如 `s3://`)。
 
 ---
 ## 3. 离线管线设计 (M1–M5)
@@ -188,7 +188,7 @@ mini 与 cluster 的计算引擎都是 Daft、流都是 Flink、抽取都是 tra
 |---|---|---|
 | 计算 | Daft 单机 (native runner) | Daft Ray runner |
 | 流 | Flink MiniCluster + 文件 replay 源 | Flink on K8s + Kafka |
-| 存储 | 本地 Lance 数据集 | Paimon on OSS/S3 |
+| 存储 | Lance 数据集(本地目录) | Lance 数据集(对象存储 URI) |
 | 抽取 | trafilatura + resiliparse | trafilatura + resiliparse |
 | 推理 | vLLM / 外部 API 适配层(小模型或 mock)| vLLM GPU 节点 |
 | registry | SQLite | Postgres |
@@ -273,10 +273,10 @@ uv run python -m registry.cli trace --kind pair --id <pair_id>
 `registry/db.py` 元库、各模块适配层)路由:
 
 ```bash
-uv sync --extra cluster            # 装 ray / pypaimon / psycopg / openai / s3fs
+uv sync --extra cluster            # 装 ray / psycopg / openai / s3fs
 # GPU 节点上另装: uv pip install vllm fasttext-wheel
 
-# 离线管线 (Daft Ray runner, 读 s3 WARC, 写 Paimon, 注册进 Postgres)
+# 离线管线 (Daft Ray runner, 读 s3 WARC, 写 Lance on S3, 注册进 Postgres)
 uv run python -c "from common.config import load_profile; from offline.m1_warc_ingest import ingest; ingest.run(load_profile('configs/cluster.yaml'))"
 # M2–M8 同理传 configs/cluster.yaml; 或整链: uv run python scripts/run_mini.py configs/cluster.yaml
 ```
@@ -286,7 +286,7 @@ uv run python -c "from common.config import load_profile; from offline.m1_warc_i
 | 组件 | mini | cluster | 配置项 |
 |---|---|---|---|
 | 计算引擎 | Daft native runner | Daft Ray runner | `runner: native\|ray` |
-| 存储 | 本地 Lance 数据集 | Paimon on OSS/S3 | `storage: lance\|paimon` + `data_root` |
+| 存储 | Lance(本地目录) | Lance(对象存储 URI) | `data_root` + `storage_options` |
 | M1 抽取 | trafilatura + resiliparse | trafilatura + resiliparse | (同构,不变) |
 | M2 语种 | CJK 启发式 | fastText lid.176 | `m2_filter.langid` |
 | M4 教师 | 启发式 | 强模型 API (rubric) | `m4_quality.teacher` + `teacher_endpoint` |
@@ -298,9 +298,10 @@ uv run python -c "from common.config import load_profile; from offline.m1_warc_i
 | registry | SQLite | Postgres | `registry_db: postgresql://...` |
 
 分发逻辑均有测试覆盖:`tests/test_distributed_dispatch.py` 用假后端验证 cluster
-配置确实路由到 Paimon 写读、Postgres DSN、vLLM 客户端与 BGE 嵌入 API,无需真实集群。
+配置确实把 storage_options 透传给 Lance、解析出 Postgres DSN、构造 vLLM 客户端与
+BGE 嵌入 API,无需真实集群。
 
 > 边界:分发代码已实现且经假后端验证,但**端到端的真实分布式联调**(实际 Ray
-> 集群、Paimon on OSS、Flink on K8s + Kafka、Postgres、vLLM 服务)需在对应基础设施
-> 上进行,本仓库未包含部署清单(K8s manifest / Helm)。fastText `lid.176.bin`、
+> 集群、Lance on S3/OSS、Flink on K8s + Kafka、Postgres、vLLM 服务)需在对应基础
+> 设施上进行,本仓库未包含部署清单(K8s manifest / Helm)。fastText `lid.176.bin`、
 > BGE/强模型/vLLM 服务需自行就位。

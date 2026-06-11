@@ -2,7 +2,7 @@
 # 计算: Daft native runner; 存储: Lance 数据集; 流: Flink MiniCluster
 profile: mini
 runner: native             # Daft 单机 runner (cluster 切 ray)
-storage: lance             # Lance 数据集 (cluster 切 paimon)
+storage: lance             # Lance 数据集 (本地与分布式统一, 仅 data_root 不同)
 data_root: data            # 所有湖表落在 <repo>/data 下的 Lance dataset 目录
 registry_db: data/registry.sqlite
 

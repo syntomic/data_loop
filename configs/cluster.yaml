@@ -1,17 +1,15 @@
 # cluster profile: 分布式后端, 与 mini 同构, 只改本文件即可切换 (README §7/§11)。
-# 计算: Daft Ray runner; 存储: Paimon on OSS/S3; 流: Flink on K8s + Kafka;
+# 计算: Daft Ray runner; 存储: Lance on S3; 流: Flink on K8s + Kafka;
 # registry: Postgres; 模型: vLLM / 强模型 API。依赖: uv sync --extra cluster
 profile: cluster
 runner: ray
-storage: paimon
-data_root: s3://data-loop/lake          # Paimon warehouse
+storage: lance                          # 与本地同构, 仅 data_root 指向对象存储
+data_root: s3://data-loop/lake
 registry_db: postgresql://registry:5432/data_loop
 
-# 对象存储 / Paimon catalog 凭证 (按需填) ----------------------------------
-fs_options: {}                           # fsspec/s3fs 选项, 供 corpus shard 写入
-paimon:
-  database: data_loop
-  options: {}                            # 如 {fs.oss.endpoint: ..., fs.oss.accessKeyId: ...}
+# 对象存储凭证 (按需填), 透传给 Lance 与 corpus shard 写入 -------------------
+storage_options: {}                      # 如 {region: cn-hangzhou, access_key_id: ..., secret_access_key: ...}
+fs_options: {}                           # fsspec/s3fs 选项 (corpus shard 文本)
 
 m1_warc_ingest:
   warc_glob: "s3://cc/CC-MAIN-2026-18/*.warc.gz"
