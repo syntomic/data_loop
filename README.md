@@ -170,11 +170,30 @@ score(reward + safety + embedding)
 
 ## 6. 注册与血缘 (M9 registry)
 
-- 表: `dataset_version`、`lineage_edge`、`decontam_log`、`ablation_report`。
+- 表: `dataset_version`、`lineage_edge`、`decontam_log`、`ablation_report`、`dataset_snapshot`。
 - 任何写入下游训练目录的数据集必须先注册版本并通过去污染检查。
 - 血缘边: 文档级到 `warc_file+offset`;偏好级到 `conversation_id+turn_id`。
 
 去污染基线: eval 套件全部条目做 13-gram 精确匹配 + MinHash 近重,命中即剔除并写 `decontam_log`。anneal 层 + 偏好集执行更高阈值。
+
+### 6.1 版本可复现:registry 绑定 Lance 物理快照
+
+逻辑版本(`corpus-stable-v1`、`pref-v1`)钉到它消费/产出的 Lance 物理 `version`,
+两者通过 `dataset_snapshot` 表桥接,真正兑现"每个数据集版本可复现"。设计细节见
+[`docs/design_lance_registry.md`](docs/design_lance_registry.md)。
+
+- 写入层 `Lake.write` 返回提交的 Lance version;`Lake.read(name, version=N)` 时间旅行读历史快照。
+- `register(..., snapshots=[...])` 把逻辑版本绑定到 output/input 物理快照;
+  `save_ablation(..., snap_a, snap_b)` 把 A/B 两臂绑定到各自不可变快照。
+- Lance overwrite 仍保留历史 version,故重跑上游后,旧逻辑版本按记录的 version 仍能精确还原。
+- registry 是唯一权威;同时在 Lance 上打 `tag=版本号` 作冗余镜像,便于 `lance` 直接浏览。
+- 原子顺序:先写 Lance(拿到 version)再 registry 记录,registry 绝不指向未提交数据。
+
+```bash
+uv run python -m registry.cli snapshots --id pref-v1      # 列出绑定的物理快照
+uv run python -m registry.cli reproduce  --id pref-v1 --load  # 按快照还原并验证行数
+uv run python -m registry.cli cleanup    --keep-days 7    # 回收未被引用的超龄旧 version
+```
 
 ---
 

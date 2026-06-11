@@ -30,6 +30,7 @@ def run(cfg: dict, in_name: str = "doc_scored", manifest_suffix: str = "v1") -> 
     m = cfg["m5_corpus"]
     lake = Lake(cfg)
     docs = lake.read(in_name)
+    in_snap = lake.snapshot(in_name, role="input")  # 钉住产出 corpus 时的 doc_scored 快照
     eval_items = load_eval_items(cfg)
     reg = Registry.from_cfg(cfg)
     manifests = {}
@@ -50,8 +51,8 @@ def run(cfg: dict, in_name: str = "doc_scored", manifest_suffix: str = "v1") -> 
         _write_shard(lake, layer, ["".join(_tokenize(d["text"])) for d in kept])
         manifest = {"manifest_id": mid, "layer": layer, "doc_count": len(kept), "token_count": tokens,
                     "dump_distribution": dict(dumps), "classifier_version": cfg["m4_quality"]["classifier_version"],
-                    "rules_version": "filter_rules-v1"}
-        reg.register(mid, "corpus_manifest", manifest)
+                    "rules_version": "filter_rules-v1", "source_version": in_snap.version}
+        reg.register(mid, "corpus_manifest", manifest, snapshots=[in_snap])
         for d in kept:
             reg.add_lineage("corpus_manifest", mid, "doc", d["doc_id"])
             reg.add_lineage("doc", d["doc_id"], "warc", f"{d['warc_file']}+{d['warc_offset']}")

@@ -10,10 +10,11 @@ from .eval_harness import proxy_eval, significant
 def run(cfg: dict) -> dict:
     seed = cfg["m6_ablation"]["seed"]
     lake = Lake(cfg)
-    arms = {}
+    arms, snaps = {}, {}
     for arm, scope in [("a", "per_dump"), ("b", "global")]:
         dedup.run(cfg, scope=scope, out_name=f"doc_dedup_{arm}")
         quality.run(cfg, in_name=f"doc_dedup_{arm}", out_name=f"doc_scored_{arm}")
+        snaps[arm] = lake.snapshot(f"doc_scored_{arm}", role=f"arm_{arm}")
         arms[arm] = proxy_eval(lake.read(f"doc_scored_{arm}"), seed)
     sig = significant(arms["a"], arms["b"])
     conclusion = ("per_dump 与 global 无显著差异, 维持默认 per_dump" if not sig
@@ -21,6 +22,6 @@ def run(cfg: dict) -> dict:
     reg = Registry.from_cfg(cfg)
     reg.save_ablation("dedup_scope-v1", "m3_dedup.scope: per_dump vs global",
                       arms["a"], arms["b"], sig, conclusion,
-                      "doc_scored_a", "doc_scored_b")
+                      "doc_scored_a", "doc_scored_b", snap_a=snaps["a"], snap_b=snaps["b"])
     return {"decision_id": "dedup_scope-v1", "score_a": arms["a"], "score_b": arms["b"],
             "significant": sig, "conclusion": conclusion}

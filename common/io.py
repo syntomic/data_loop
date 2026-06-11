@@ -17,22 +17,33 @@ def _local_parent(uri: str):
         Path(uri).parent.mkdir(parents=True, exist_ok=True)
 
 
-def write_table(rows: list[dict], schema: pa.Schema, uri: str, storage_options: dict | None = None):
+def write_table(rows: list[dict], schema: pa.Schema, uri: str,
+                storage_options: dict | None = None) -> int:
+    """写 Lance 数据集 (overwrite 仍保留历史 version), 返回提交的物理 version。"""
     _local_parent(str(uri))
     table = pa.Table.from_pylist(rows, schema=schema)
     lance.write_dataset(table, str(uri), mode="overwrite",
                         data_storage_version="2.2", storage_options=storage_options)
+    return lance.dataset(str(uri), storage_options=storage_options).version
 
 
-def read_table(uri: str, storage_options: dict | None = None) -> list[dict]:
+def read_table(uri: str, storage_options: dict | None = None,
+               version: int | None = None) -> list[dict]:
     try:
-        ds = lance.dataset(str(uri), storage_options=storage_options)
+        ds = lance.dataset(str(uri), storage_options=storage_options, version=version)
     except (ValueError, OSError, FileNotFoundError):
-        return []  # 数据集不存在
+        return []  # 数据集 / 指定 version 不存在
     return ds.to_table().to_pylist()
 
 
-def read_daft(uri: str, storage_options: dict | None = None):
+def read_daft(uri: str, storage_options: dict | None = None, version: int | None = None):
     """供需要在 Daft DataFrame 上做下推/算子的调用方使用。"""
     import daft
-    return daft.read_lance(str(uri), storage_options=storage_options)
+    return daft.read_lance(str(uri), storage_options=storage_options, version=version)
+
+
+def latest_version(uri: str, storage_options: dict | None = None) -> int | None:
+    try:
+        return lance.dataset(str(uri), storage_options=storage_options).version
+    except (ValueError, OSError, FileNotFoundError):
+        return None

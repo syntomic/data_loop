@@ -23,7 +23,12 @@ _DDL = [
          decision_id TEXT PRIMARY KEY, config_diff TEXT, score_a DOUBLE PRECISION,
          score_b DOUBLE PRECISION, significant INTEGER, conclusion TEXT,
          manifest_a TEXT, manifest_b TEXT, ts BIGINT)""",
+    # Lance 物理快照绑定: 逻辑版本/决策 ↔ (表, version)。docs/design_lance_registry.md
+    """CREATE TABLE IF NOT EXISTS dataset_snapshot (
+         version_id TEXT, role TEXT, table_name TEXT, table_uri TEXT, lance_version BIGINT,
+         UNIQUE(version_id, role, table_name))""",
     "CREATE INDEX IF NOT EXISTS idx_lineage_child ON lineage_edge(child_kind, child_id)",
+    "CREATE INDEX IF NOT EXISTS idx_snapshot_version ON dataset_snapshot(version_id)",
 ]
 
 
@@ -85,7 +90,27 @@ class Registry:
                    (version_id, item_id, reason, int(time.time())))
         self.conn.commit()
 
-    def register(self, version_id: str, kind: str, manifest: dict):
+    def bind_snapshot(self, version_id: str, role: str, table_name: str,
+                      table_uri: str, lance_version: int | None):
+        """钉住一个 (逻辑版本, 物理表快照) 绑定。lance_version 为 None 时跳过。"""
+        if lance_version is None:
+            return
+        sql = ("INSERT INTO dataset_snapshot VALUES (?,?,?,?,?) "
+               "ON CONFLICT (version_id, role, table_name) DO UPDATE SET "
+               "table_uri=EXCLUDED.table_uri, lance_version=EXCLUDED.lance_version") if self.is_pg else \
+              "INSERT OR REPLACE INTO dataset_snapshot VALUES (?,?,?,?,?)"
+        self._exec(sql, (version_id, role, table_name, table_uri, lance_version))
+        self.conn.commit()
+
+    def snapshots(self, version_id: str) -> list[dict]:
+        """取某逻辑版本/决策绑定的全部物理快照 (可复现依据)。"""
+        rows = self._exec(
+            "SELECT role, table_name, table_uri, lance_version FROM dataset_snapshot "
+            "WHERE version_id=?", (version_id,)).fetchall()
+        return [{"role": r[0], "table_name": r[1], "table_uri": r[2], "lance_version": r[3]}
+                for r in rows]
+
+    def register(self, version_id: str, kind: str, manifest: dict, snapshots: list = None):
         checked = self._exec("SELECT 1 FROM decontam_log WHERE version_id=?", (version_id,)).fetchone()
         if not checked:
             raise PermissionError(f"{version_id}: 无 decontam 记录, 拒绝注册 (README §10)")
@@ -95,6 +120,8 @@ class Registry:
               "INSERT OR REPLACE INTO dataset_version VALUES (?,?,?,?)"
         self._exec(sql, (version_id, kind, int(time.time()), json.dumps(manifest, ensure_ascii=False)))
         self.conn.commit()
+        for s in (snapshots or []):
+            self.bind_snapshot(version_id, s.role, s.name, s.uri, s.version)
 
     def add_lineage(self, child_kind: str, child_id: str, parent_kind: str, parent_id: str):
         sql = ("INSERT INTO lineage_edge VALUES (?,?,?,?) ON CONFLICT DO NOTHING") if self.is_pg else \
@@ -114,7 +141,8 @@ class Registry:
         return out
 
     def save_ablation(self, decision_id: str, diff: str, score_a: float, score_b: float,
-                      significant: bool, conclusion: str, manifest_a: str, manifest_b: str):
+                      significant: bool, conclusion: str, manifest_a: str, manifest_b: str,
+                      snap_a=None, snap_b=None):
         sql = ("INSERT INTO ablation_report VALUES (?,?,?,?,?,?,?,?,?) "
                "ON CONFLICT (decision_id) DO UPDATE SET config_diff=EXCLUDED.config_diff, "
                "score_a=EXCLUDED.score_a, score_b=EXCLUDED.score_b, significant=EXCLUDED.significant, "
@@ -124,3 +152,7 @@ class Registry:
         self._exec(sql, (decision_id, diff, score_a, score_b, int(significant),
                          conclusion, manifest_a, manifest_b, int(time.time())))
         self.conn.commit()
+        if snap_a:
+            self.bind_snapshot(decision_id, "arm_a", snap_a.name, snap_a.uri, snap_a.version)
+        if snap_b:
+            self.bind_snapshot(decision_id, "arm_b", snap_b.name, snap_b.uri, snap_b.version)

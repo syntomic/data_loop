@@ -17,6 +17,7 @@ from .score import cluster_and_novelty, score_turn
 def run(cfg: dict, version_id: str = "pref-v1") -> dict:
     m = cfg["m8_pref"]
     lake = Lake(cfg)
+    turn_snap = lake.snapshot("turn_candidate", role="input")  # 偏好集消费的 turn 快照
     turns = lake.read("turn_candidate")
     scored = cluster_and_novelty([score_turn(t) for t in turns])
     selected = select(scored, m["cluster_quota"])
@@ -47,11 +48,17 @@ def run(cfg: dict, version_id: str = "pref-v1") -> dict:
     final = run_qc(auto, load_eval_items(cfg), reg, version_id, m["cluster_quota"])
     reg.log_decontam(version_id, "_checked", "decontam_pass")
 
-    lake.write("preference_pair", final, PREFERENCE_PAIR)
+    pref_v = lake.write("preference_pair", final, PREFERENCE_PAIR)
     lake.write("human_queue", human, PREFERENCE_PAIR)
     rlhf = [p | {"dataset_version": version_id} for p in final]
-    lake.write("rlhf_example", rlhf, RLHF_EXAMPLE)
-    reg.register(version_id, "rlhf_example", {"pairs": len(final), "human_queue": len(human)})
+    rlhf_v = lake.write("rlhf_example", rlhf, RLHF_EXAMPLE)
+    reg.register(version_id, "rlhf_example",
+                 {"pairs": len(final), "human_queue": len(human),
+                  "preference_pair_version": pref_v, "rlhf_example_version": rlhf_v,
+                  "turn_candidate_version": turn_snap.version},
+                 snapshots=[lake.snapshot("preference_pair", pref_v, "output"),
+                            lake.snapshot("rlhf_example", rlhf_v, "output"), turn_snap])
+    lake.tag("rlhf_example", version_id, rlhf_v)   # Lance tag 镜像 registry 逻辑版本
     for p in final:
         reg.add_lineage("rlhf_example", version_id, "pair", p["pair_id"])
         reg.add_lineage("pair", p["pair_id"], "turn", f"{p['conversation_id']}+{p['turn_id']}")
