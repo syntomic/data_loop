@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "LLM 训练数据闭环平台 (offline + online + loop infra), mini profile"
 requires-python = ">=3.10"
 dependencies = [
+    "pyarrow>=14",
     "numpy>=1.24",
     "PyYAML>=6",
     "warcio>=1.7",
@@ -23,9 +24,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# cluster profile 额外的重型依赖 (Ray 分布式 / fastText / vLLM, 需 GPU),
-# 不随 mini 默认安装: uv pip install ray fasttext-wheel vllm
-cluster = ["ray", "fasttext-wheel", "vllm"]
+# cluster profile 额外依赖 (Ray 分布式 / Paimon / Postgres / 模型客户端 / 对象存储),
+# 不随 mini 默认安装: uv sync --extra cluster (GPU 节点上再装 vllm/fasttext)
+cluster = [
+    "ray",                  # Daft Ray runner
+    "pypaimon",             # Paimon 湖表
+    "psycopg[binary]",      # Postgres registry
+    "openai",               # vLLM / 强模型 / 裁判 (OpenAI 兼容客户端)
+    "fsspec",               # 对象存储 (corpus shard)
+    "s3fs",
+]
 
 [dependency-groups]
 dev = ["pytest>=7"]

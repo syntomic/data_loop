@@ -17,13 +17,48 @@ from pyflink.datastream import KeyedProcessFunction, RuntimeContext, StreamExecu
 from pyflink.datastream.state import StateTtlConfig, ValueStateDescriptor
 
 from common.config import resolve
-from common.io import write_table
+from common.lake import Lake
 from schemas.tables import TURN_CANDIDATE
 from .pii import scrub
 
 
 def _read_jsonl(p: Path):
     return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+
+
+def _build_env(m: dict) -> StreamExecutionEnvironment:
+    """MiniCluster(本地) 或 远端 Flink 集群 (jobmanager 来自 configs)。"""
+    jm = m.get("jobmanager")
+    if jm:
+        from pyflink.common import Configuration
+        conf = Configuration()
+        host, _, port = jm.partition(":")
+        conf.set_string("rest.address", host)
+        conf.set_string("rest.port", port or "8081")
+        env = StreamExecutionEnvironment.get_execution_environment(conf)
+    else:
+        env = StreamExecutionEnvironment.get_execution_environment()
+    env.set_parallelism(m.get("parallelism", 1))
+    return env
+
+
+def _kafka_source(env, cfg: dict, m: dict):
+    """从 message_events / feedback_events 两个 topic 读事件 (cluster)。"""
+    from pyflink.datastream.connectors.kafka import KafkaSource, KafkaOffsetsInitializer
+    from pyflink.common.serialization import SimpleStringSchema
+    from pyflink.common.typeinfo import Types as T
+
+    def build(topic, tag):
+        src = (KafkaSource.builder()
+               .set_bootstrap_servers(m["kafka"])
+               .set_topics(topic)
+               .set_group_id(m.get("group_id", "data-loop-m7"))
+               .set_starting_offsets(KafkaOffsetsInitializer.earliest())
+               .set_value_only_deserializer(SimpleStringSchema()).build())
+        return (env.from_source(src, WatermarkStrategy.no_watermarks(), f"kafka-{topic}")
+                .map(lambda s, tag=tag: json.loads(s) | {"_topic": tag}, output_type=T.PICKLED_BYTE_ARRAY()))
+
+    return build(m["message_topic"], "message").union(build(m["feedback_topic"], "feedback"))
 
 
 class _ArrivalTs(TimestampAssigner):
@@ -84,25 +119,29 @@ class _TurnAggregate(KeyedProcessFunction):
             self.state.clear()
 
 
-def run(cfg: dict) -> Path:
+def run(cfg: dict) -> str:
     m = cfg["m7_signal_ingest"]
-    consent = {c["user_id"]: c["consent_ok"] for c in _read_jsonl(resolve(cfg, m["consent_table"]))}
-    events = sorted(
-        [e | {"_topic": "message"} for e in _read_jsonl(resolve(cfg, m["message_events"]))] +
-        [e | {"_topic": "feedback"} for e in _read_jsonl(resolve(cfg, m["feedback_events"]))],
-        key=lambda e: e["ts"])
-    events = [e for e in events if consent.get(e["user_id"], False)]  # 隐私闸 (维表 join)
-
-    env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(1)
+    env = _build_env(m)
     wm = WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_millis(m["watermark_ms"])) \
         .with_timestamp_assigner(_ArrivalTs())
-    stream = env.from_collection(events).assign_timestamps_and_watermarks(wm) \
-        .key_by(lambda e: f"{e['conversation_id']}:{e['turn_id']}") \
+
+    if m.get("source", "file_replay") == "kafka":
+        # 集群: Kafka 无界源, consent 维表 lookup join 在 UDF 内做 (此处略, 接业务实现)
+        keyed = _kafka_source(env, cfg, m).assign_timestamps_and_watermarks(wm)
+    else:
+        # 本地: 文件 replay 有界源, consent 隐私闸先做维表 join
+        consent = {c["user_id"]: c["consent_ok"] for c in _read_jsonl(resolve(cfg, m["consent_table"]))}
+        events = sorted(
+            [e | {"_topic": "message"} for e in _read_jsonl(resolve(cfg, m["message_events"]))] +
+            [e | {"_topic": "feedback"} for e in _read_jsonl(resolve(cfg, m["feedback_events"]))],
+            key=lambda e: e["ts"])
+        events = [e for e in events if consent.get(e["user_id"], False)]
+        keyed = env.from_collection(events).assign_timestamps_and_watermarks(wm)
+
+    stream = keyed.key_by(lambda e: f"{e['conversation_id']}:{e['turn_id']}") \
         .process(_TurnAggregate(m["watermark_ms"], m["allowed_lateness_ms"], m["state_ttl_ms"]))
 
     rows = [s | {"dt": datetime.fromtimestamp(s["event_ts"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d")}
             for s in stream.execute_and_collect()]
-    out = resolve(cfg, cfg["data_root"]) / "turn_candidate"
-    write_table(rows, TURN_CANDIDATE, out, partition="dt")
-    return out
+    Lake(cfg).write("turn_candidate", rows, TURN_CANDIDATE, partition="dt")
+    return "turn_candidate"

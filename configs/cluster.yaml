@@ -1,16 +1,73 @@
-# cluster profile: 占位配置, 接口与 mini 对齐 (README §7)
+# cluster profile: 分布式后端, 与 mini 同构, 只改本文件即可切换 (README §7/§11)。
+# 计算: Daft Ray runner; 存储: Paimon on OSS/S3; 流: Flink on K8s + Kafka;
+# registry: Postgres; 模型: vLLM / 强模型 API。依赖: uv sync --extra cluster
 profile: cluster
-runner: ray                        # Daft Ray runner (分布式)
-storage: paimon                    # Paimon on OSS/S3
-data_root: s3://data-loop/lake
-registry_db: postgresql://registry
+runner: ray
+storage: paimon
+data_root: s3://data-loop/lake          # Paimon warehouse
+registry_db: postgresql://registry:5432/data_loop
 
-m1_warc_ingest: {warc_glob: "s3://cc/CC-MAIN-2026-18/*.warc.gz", dump_id: CC-MAIN-2026-18, extractor: trafilatura}
-m2_filter: {rules_file: configs/filter_rules.yaml, blacklist_file: configs/blacklist.txt, stopwords_file: configs/stopwords_zh.txt, langid: fasttext, zh_conf_min: 0.65}
+# 对象存储 / Paimon catalog 凭证 (按需填) ----------------------------------
+fs_options: {}                           # fsspec/s3fs 选项, 供 corpus shard 写入
+paimon:
+  database: data_loop
+  options: {}                            # 如 {fs.oss.endpoint: ..., fs.oss.accessKeyId: ...}
+
+m1_warc_ingest:
+  warc_glob: "s3://cc/CC-MAIN-2026-18/*.warc.gz"
+  dump_id: CC-MAIN-2026-18
+  extractor: trafilatura                 # trafilatura + resiliparse (与 mini 同构)
+
+m2_filter:
+  rules_file: configs/filter_rules.yaml
+  blacklist_file: configs/blacklist.txt
+  stopwords_file: configs/stopwords_zh.txt
+  langid: fasttext                       # fastText lid.176 (需 lid.176.bin)
+  zh_conf_min: 0.65
+
 m3_dedup: {scope: per_dump, ngram: 5, num_perm: 112, bands: 14, rows: 8}
-m4_quality: {teacher: api, teacher_sample: 500000, embedding: bge-zh, embedding_dim: 768, classifier_version: bge-zh-reg-v1}
+
+m4_quality:
+  teacher: api                           # 强模型 API 打 rubric 分
+  teacher_endpoint: http://teacher-svc/v1
+  teacher_model: strong-zh
+  teacher_sample: 500000
+  embedding: bge-zh                      # BGE-zh embeddings API
+  embedding_endpoint: http://bge-svc/v1
+  embedding_model: bge-zh
+  embedding_dim: 768
+  api_key: EMPTY
+  classifier_version: bge-zh-reg-v1
+
 m5_corpus: {stable_threshold: 3.0, anneal_threshold: 4.2, shard_tokens: 100000000, tokenizer: bpe}
+
 m6_ablation: {decision: dedup_scope, model_size: 0.2B, train_tokens: 5000000000, seed: 42}
-m7_signal_ingest: {kafka: "kafka:9092", watermark_ms: 300000, allowed_lateness_ms: 1800000, state_ttl_ms: 86400000}
-m8_pref: {judge: vllm, generator: vllm, judge_conf_auto: 0.8, cluster_quota: 2000, reward_min: 0.0}
+
+m7_signal_ingest:
+  backend: flink
+  source: kafka                          # Kafka 无界源 (mini 用 file_replay)
+  kafka: "kafka:9092"
+  message_topic: message_events
+  feedback_topic: feedback_events
+  group_id: data-loop-m7
+  jobmanager: "flink-jobmanager:8081"    # Flink on K8s (留空则本地 MiniCluster)
+  parallelism: 8
+  consent_table: replay-data/consent.jsonl
+  watermark_ms: 300000
+  allowed_lateness_ms: 1800000
+  state_ttl_ms: 86400000
+
+m8_pref:
+  judge: vllm
+  generator: vllm
+  generator_endpoint: http://vllm-svc/v1
+  judge_endpoint: http://judge-svc/v1
+  judge_model: judge-zh
+  models: {current_model: current-zh, strong_model: strong-zh}
+  api_key: EMPTY
+  max_tokens: 1024
+  judge_conf_auto: 0.8
+  cluster_quota: 2000
+  reward_min: 0.0
+
 decontam: {eval_file: configs/eval_suite_zh.txt, ngram: 13}

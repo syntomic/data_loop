@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from common.config import load_profile, resolve
-from common.io import read_table
+from common.config import resolve
+from common.lake import Lake
 from online.m7_flink import job
 from online.m7_flink.pii import scrub
 
@@ -14,7 +14,7 @@ def turns(cfg):
     import subprocess, sys
     subprocess.run([sys.executable, str(resolve(cfg, "replay-data/generate.py"))], check=True)
     job.run(cfg)
-    return read_table(resolve(cfg, cfg["data_root"]) / "turn_candidate")
+    return Lake(cfg).read("turn_candidate")
 
 
 def test_pii_scrub():

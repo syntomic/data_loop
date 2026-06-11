@@ -2,7 +2,7 @@
 import argparse
 import sys
 
-from common.config import load_profile, resolve
+from common.config import load_profile
 from .db import Registry
 
 
@@ -13,9 +13,9 @@ def main(argv=None):
     ap.add_argument("--profile", default="configs/mini.yaml")
     a = ap.parse_args(argv)
     cfg = load_profile(a.profile)
-    reg = Registry(resolve(cfg, cfg["registry_db"]))
+    reg = Registry.from_cfg(cfg)
     if a.cmd == "versions":
-        for row in reg.conn.execute("SELECT version_id, kind, created_ts FROM dataset_version"):
+        for row in reg.query("SELECT version_id, kind, created_ts FROM dataset_version"):
             print(*row, sep="\t")
     elif a.cmd == "trace":
         if not (a.kind and a.id):
@@ -23,7 +23,7 @@ def main(argv=None):
         for pk, pi in reg.trace(a.kind, a.id):
             print(pk, pi, sep="\t")
     else:
-        for row in reg.conn.execute("SELECT decision_id, score_a, score_b, conclusion FROM ablation_report"):
+        for row in reg.query("SELECT decision_id, score_a, score_b, conclusion FROM ablation_report"):
             print(*row, sep="\t")
 
 

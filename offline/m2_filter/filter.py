@@ -5,27 +5,27 @@ from urllib.parse import urlparse
 import yaml
 
 from common.config import resolve
-from common.io import read_table, write_table
+from common.lake import Lake
 from schemas.tables import DOC_FILTERED
 from .langid import detect
 from .rules import evaluate
 
 
-def run(cfg: dict) -> Path:
+def run(cfg: dict) -> str:
     m = cfg["m2_filter"]
+    lake = Lake(cfg)
     rules = yaml.safe_load(resolve(cfg, m["rules_file"]).read_text())
     blacklist = {l.strip() for l in resolve(cfg, m["blacklist_file"]).read_text().splitlines()
                  if l.strip() and not l.startswith("#")}
     stopwords = {l.strip() for l in resolve(cfg, m["stopwords_file"]).read_text().splitlines() if l.strip()}
 
     rows = []
-    for doc in read_table(resolve(cfg, cfg["data_root"]) / "doc_raw"):
+    for doc in lake.read("doc_raw"):
         lang, conf = detect(doc["text"], m["langid"])
         flags = {"lang_ok": lang == "zh" and conf >= m["zh_conf_min"],
                  "domain_ok": urlparse(doc["url"]).hostname not in blacklist}
         flags.update(evaluate(doc["text"], rules, stopwords))
         rows.append(doc | {"lang": lang, "lang_conf": conf,
                            "filter_flags": flags, "kept": all(flags.values())})
-    out = resolve(cfg, cfg["data_root"]) / "doc_filtered"
-    write_table(rows, DOC_FILTERED, out, partition="dump_id")
-    return out
+    lake.write("doc_filtered", rows, DOC_FILTERED, partition="dump_id")
+    return "doc_filtered"

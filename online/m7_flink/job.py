@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from common.config import resolve
-from common.io import write_table
+from common.lake import Lake
 from schemas.tables import TURN_CANDIDATE
 from .pii import scrub
 
@@ -77,6 +77,5 @@ def run(cfg: dict) -> Path:
     rows = [{k: v for k, v in s.items() if k not in ("timer", "expire")} |
             {"dt": datetime.fromtimestamp(s["event_ts"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d")}
             for s in fired.values()]
-    out = resolve(cfg, cfg["data_root"]) / "turn_candidate"
-    write_table(rows, TURN_CANDIDATE, out, partition="dt")
-    return out
+    Lake(cfg).write("turn_candidate", rows, TURN_CANDIDATE, partition="dt")
+    return "turn_candidate"

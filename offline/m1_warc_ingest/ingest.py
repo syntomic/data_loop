@@ -6,7 +6,7 @@ from pathlib import Path
 from warcio.archiveiterator import ArchiveIterator
 
 from common.config import resolve
-from common.io import write_table
+from common.lake import Lake
 from schemas.tables import DOC_RAW
 from .extractor import extract
 
@@ -39,6 +39,5 @@ def run(cfg: dict) -> Path:
                     "extractor": extractor,
                     "fetch_ts": 1750000000000,
                 })
-    out = resolve(cfg, cfg["data_root"]) / "doc_raw"
-    write_table(rows, DOC_RAW, out, partition="dump_id")
-    return out
+    Lake(cfg).write("doc_raw", rows, DOC_RAW, partition="dump_id")
+    return "doc_raw"

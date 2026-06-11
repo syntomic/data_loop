@@ -266,37 +266,41 @@ uv run python -m registry.cli trace --kind pair --id <pair_id>
 > 仅用于 `tests/test_m7_flink.py` 校验两者输出逐行一致;切回它把 backend 改成
 > `replay` 即可(无需 JVM)。
 
-### 11.2 集群运行 (cluster profile)
+### 11.2 集群运行 (cluster profile) —— 只改配置
 
-所有命令换成 `--profile configs/cluster.yaml`,模块代码、存储/计算抽象与
-抽取器都不变,只把单机后端换成分布式后端:
-
-| 组件 | mini 后端 | cluster 后端 | 切换点 |
-|---|---|---|---|
-| 计算引擎 | Daft native runner | Daft Ray runner | `runner: ray` |
-| 存储 | 本地 Lance 数据集 | Paimon on OSS/S3 | `storage` / `data_root: s3://...` |
-| M1 抽取 | trafilatura + resiliparse | trafilatura + resiliparse | (同构,不变) |
-| M2 语种 | CJK 启发式 | fastText lid.176 | `m2_filter.langid` |
-| M4 教师/嵌入 | 启发式 / hashing | 强模型 API / BGE-zh | `m4_quality.teacher/embedding` |
-| M7 流 | Flink MiniCluster + 文件 replay 源 | Flink on K8s + Kafka | `m7_signal_ingest.kafka` |
-| M8 生成/裁判 | 确定性 mock | vLLM GPU 节点 | `m8_pref.generator/judge` |
-| registry | SQLite | Postgres | `registry_db: postgresql://...` |
-
-部署顺序(里程碑 P1–P6 对应):
+分布式运行**不需要改任何代码**,只换配置文件。所有后端选择都从 configs 读取并由
+统一的分发层(`common/lake.py` 存储、`common/config.py` 计算 runner、
+`registry/db.py` 元库、各模块适配层)路由:
 
 ```bash
-# 0) GPU 密集的分布式额外依赖 (Ray/fastText/vLLM) 不随 mini 默认安装
-uv pip install ray fasttext-wheel vllm
+uv sync --extra cluster            # 装 ray / pypaimon / psycopg / openai / s3fs
+# GPU 节点上另装: uv pip install vllm fasttext-wheel
 
-# 1) 离线管线: Daft Ray runner 提交 M1–M5 (warc_glob 指向 CC dump 清单)
+# 离线管线 (Daft Ray runner, 读 s3 WARC, 写 Paimon, 注册进 Postgres)
 uv run python -c "from common.config import load_profile; from offline.m1_warc_ingest import ingest; ingest.run(load_profile('configs/cluster.yaml'))"
-# M2–M5 同理; corpus manifest 自动注册进 Postgres registry
-
-# 2) 在线管线: M7 作业以相同语义提交 Flink on K8s (Kafka 两 topic 接生产事件);
-#    M8 按日批调度, judge/generate 指向 vLLM 服务
-# 3) M6 消融在训练集群跑 0.2B/5B token, 报告写回 registry
+# M2–M8 同理传 configs/cluster.yaml; 或整链: uv run python scripts/run_mini.py configs/cluster.yaml
 ```
 
-注意:cluster profile 当前是接口占位——配置与后端接口已对齐(计算/存储/流/抽取
-在两 profile 同构),但 Ray runner 提交、Paimon writer、Flink on K8s + Kafka 部署
-清单、Postgres registry 尚未接线,属里程碑 P1–P6 的集群化部分。
+`configs/cluster.yaml` 与 `configs/mini.yaml` 字段一一对应,切换点全部是配置项:
+
+| 组件 | mini | cluster | 配置项 |
+|---|---|---|---|
+| 计算引擎 | Daft native runner | Daft Ray runner | `runner: native\|ray` |
+| 存储 | 本地 Lance 数据集 | Paimon on OSS/S3 | `storage: lance\|paimon` + `data_root` |
+| M1 抽取 | trafilatura + resiliparse | trafilatura + resiliparse | (同构,不变) |
+| M2 语种 | CJK 启发式 | fastText lid.176 | `m2_filter.langid` |
+| M4 教师 | 启发式 | 强模型 API (rubric) | `m4_quality.teacher` + `teacher_endpoint` |
+| M4 嵌入 | char-ngram hashing | BGE-zh embeddings API | `m4_quality.embedding` + `embedding_endpoint` |
+| M7 流源 | 文件 replay (有界) | Kafka (无界) | `m7_signal_ingest.source` + `kafka` |
+| M7 执行 | Flink MiniCluster | Flink on K8s | `m7_signal_ingest.jobmanager` |
+| M8 生成 | 确定性 mock | vLLM | `m8_pref.generator` + `generator_endpoint` |
+| M8 裁判 | 确定性 mock | vLLM 裁判 | `m8_pref.judge` + `judge_endpoint` |
+| registry | SQLite | Postgres | `registry_db: postgresql://...` |
+
+分发逻辑均有测试覆盖:`tests/test_distributed_dispatch.py` 用假后端验证 cluster
+配置确实路由到 Paimon 写读、Postgres DSN、vLLM 客户端与 BGE 嵌入 API,无需真实集群。
+
+> 边界:分发代码已实现且经假后端验证,但**端到端的真实分布式联调**(实际 Ray
+> 集群、Paimon on OSS、Flink on K8s + Kafka、Postgres、vLLM 服务)需在对应基础设施
+> 上进行,本仓库未包含部署清单(K8s manifest / Helm)。fastText `lid.176.bin`、
+> BGE/强模型/vLLM 服务需自行就位。

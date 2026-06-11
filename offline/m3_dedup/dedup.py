@@ -1,9 +1,6 @@
 """M3 dedup: per-dump MinHash LSH (默认); global 留作消融项。
 簇内保留质量启发分最高的一篇, 其余记 dup_of。"""
-from pathlib import Path
-
-from common.config import resolve
-from common.io import read_table, write_table
+from common.lake import Lake
 from schemas.tables import DOC_DEDUP
 from .minhash import _params, shingles, signature, lsh_bands
 
@@ -33,10 +30,11 @@ def _cluster(docs: list[dict], cfg_m: dict) -> dict[str, str]:
     return {d["doc_id"]: find(d["doc_id"]) for d in docs}
 
 
-def run(cfg: dict, scope: str | None = None, out_name: str = "doc_dedup") -> Path:
+def run(cfg: dict, scope: str | None = None, out_name: str = "doc_dedup") -> str:
     m = cfg["m3_dedup"]
+    lake = Lake(cfg)
     scope = scope or m["scope"]
-    docs = [d for d in read_table(resolve(cfg, cfg["data_root"]) / "doc_filtered") if d["kept"]]
+    docs = [d for d in lake.read("doc_filtered") if d["kept"]]
 
     groups = {}
     for d in docs:
@@ -53,6 +51,5 @@ def run(cfg: dict, scope: str | None = None, out_name: str = "doc_dedup") -> Pat
             for d in members:
                 if d["doc_id"] == best["doc_id"]:
                     rows.append(d | {"cluster_id": cid, "cluster_size": len(members), "dup_of": None})
-    out = resolve(cfg, cfg["data_root"]) / out_name
-    write_table(rows, DOC_DEDUP, out, partition="dump_id")
-    return out
+    lake.write(out_name, rows, DOC_DEDUP, partition="dump_id")
+    return out_name

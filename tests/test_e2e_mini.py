@@ -6,7 +6,7 @@ import sys
 import pytest
 
 from common.config import resolve
-from common.io import read_table
+from common.lake import Lake
 from registry.db import Registry
 
 
@@ -40,31 +40,30 @@ def test_layers(pipeline):
 
 def test_dedup_removed_near_dups(pipeline):
     cfg = pipeline[0]
-    kept = [d for d in read_table(resolve(cfg, cfg["data_root"]) / "doc_filtered") if d["kept"]]
-    deduped = read_table(resolve(cfg, cfg["data_root"]) / "doc_dedup")
-    assert len(deduped) < len(kept)
+    lake = Lake(cfg)
+    kept = [d for d in lake.read("doc_filtered") if d["kept"]]
+    assert len(lake.read("doc_dedup")) < len(kept)
 
 
 def test_ablation_report_in_registry(pipeline):
     cfg, _, report, _ = pipeline
-    reg = Registry(resolve(cfg, cfg["registry_db"]))
-    row = reg.conn.execute("SELECT conclusion FROM ablation_report WHERE decision_id=?",
-                           (report["decision_id"],)).fetchone()
-    assert row and row[0] == report["conclusion"]
+    reg = Registry.from_cfg(cfg)
+    row = reg.query("SELECT conclusion FROM ablation_report WHERE decision_id=?",
+                    (report["decision_id"],))
+    assert row and row[0][0] == report["conclusion"]
 
 
 def test_pref_dataset_registered_with_lineage(pipeline):
     cfg, _, _, stats = pipeline
     assert stats["auto"] > 0
-    reg = Registry(resolve(cfg, cfg["registry_db"]))
-    pair = read_table(resolve(cfg, cfg["data_root"]) / "preference_pair")[0]
+    reg = Registry.from_cfg(cfg)
+    pair = Lake(cfg).read("preference_pair")[0]
     trace = reg.trace("pair", pair["pair_id"])
     assert trace and trace[0][0] == "turn"
 
 
 def test_doc_lineage_to_warc(pipeline):
     cfg = pipeline[0]
-    reg = Registry(resolve(cfg, cfg["registry_db"]))
-    doc = max(read_table(resolve(cfg, cfg["data_root"]) / "doc_scored"),
-              key=lambda d: d["quality_score"])
+    reg = Registry.from_cfg(cfg)
+    doc = max(Lake(cfg).read("doc_scored"), key=lambda d: d["quality_score"])
     assert any(k == "warc" and ".warc.gz+" in v for k, v in reg.trace("doc", doc["doc_id"]))

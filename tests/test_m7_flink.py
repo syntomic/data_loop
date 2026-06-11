@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("pyflink")
 
 from common.config import resolve
-from common.io import read_table
+from common.lake import Lake
 
 
 def _key(rows):
@@ -20,9 +20,10 @@ def _key(rows):
 def test_flink_matches_replay(cfg):
     subprocess.run([sys.executable, str(resolve(cfg, "replay-data/generate.py"))], check=True)
     from online.m7_flink import job, job_flink
+    lake = Lake(cfg)
     job.run(cfg)
-    replay = read_table(resolve(cfg, cfg["data_root"]) / "turn_candidate")
+    replay = lake.read("turn_candidate")
     job_flink.run(cfg)
-    flink = read_table(resolve(cfg, cfg["data_root"]) / "turn_candidate")
+    flink = lake.read("turn_candidate")
     assert len(flink) == len(replay) > 0
     assert _key(flink) == _key(replay)
