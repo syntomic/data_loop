@@ -1,7 +1,7 @@
 import pytest
 
-from registry.db import Registry
-from registry.decontam import is_contaminated
+from dataloop.registry.db import Registry
+from dataloop.registry.decontam import is_contaminated
 
 
 def test_register_requires_decontam(tmp_path):

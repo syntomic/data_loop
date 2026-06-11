@@ -6,8 +6,8 @@ import pytest
 
 pytest.importorskip("pyflink")
 
-from common.config import resolve
-from common.lake import Lake
+from dataloop.common.config import resolve
+from dataloop.common.lake import Lake
 
 
 def _key(rows):
@@ -19,7 +19,7 @@ def _key(rows):
 
 def test_flink_matches_replay(cfg):
     subprocess.run([sys.executable, str(resolve(cfg, "replay-data/generate.py"))], check=True)
-    from online.m7_flink import job, job_flink
+    from dataloop.online.m7_flink import job, job_flink
     lake = Lake(cfg)
     job.run(cfg)
     replay = lake.read("turn_candidate")

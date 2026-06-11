@@ -1,7 +1,7 @@
 # 设计文档:Lance 版本管理与 Registry 结合
 
 **状态**: 设计 → 实施
-**关联**: README §1.2(可复现)、§6(注册与血缘)、M9 registry、`common/lake.py`
+**关联**: README §1.2(可复现)、§6(注册与血缘)、M9 registry、`src/dataloop/common/lake.py`
 **日期**: 2026-06-11
 
 ---
@@ -10,9 +10,9 @@
 
 平台现在有**两套互不相干的版本系统**:
 
-- **Registry**(`registry/db.py`)记录逻辑版本:`corpus-stable-v1`、`pref-v1`,
+- **Registry**(`src/dataloop/registry/db.py`)记录逻辑版本:`corpus-stable-v1`、`pref-v1`,
   外加一份 JSON manifest。但 manifest 不含任何指向物理数据的指针。
-- **Lance**(`common/io.py` 写入层)每次写都生成单调递增的物理 `version`(整数)。
+- **Lance**(`src/dataloop/common/io.py` 写入层)每次写都生成单调递增的物理 `version`(整数)。
   实测 `mode="overwrite"` **也保留全部历史版本**,可 `lance.dataset(uri, version=N)`
   时间旅行读回。`run_mini` 每重跑一次,每张表就多一组不可变快照。
 
@@ -72,7 +72,7 @@ ablation_report (dedup_scope-v1) ────┐
 
 ## 4. 详细设计
 
-### 4.1 写入层返回物理 version(`common/io.py` + `common/lake.py`)
+### 4.1 写入层返回物理 version(`src/dataloop/common/io.py` + `src/dataloop/common/lake.py`)
 
 `write_table` 写完后读取并返回提交的 version:
 

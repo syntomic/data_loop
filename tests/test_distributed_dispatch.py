@@ -10,9 +10,9 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from common.config import load_profile
-from common.lake import Lake
-from registry.db import registry_dsn
+from dataloop.common.config import load_profile
+from dataloop.common.lake import Lake
+from dataloop.registry.db import registry_dsn
 
 
 def test_cluster_profile_loads_and_selects_backends():
@@ -36,7 +36,7 @@ def test_storage_options_threaded_to_lance(monkeypatch):
 
     def fake_write(rows, schema, uri, storage_options=None):
         captured["uri"], captured["opts"] = uri, storage_options
-    monkeypatch.setattr("common.io.write_table", fake_write)
+    monkeypatch.setattr("dataloop.common.io.write_table", fake_write)
 
     cfg = {"data_root": "s3://bucket/lake", "storage_options": {"region": "cn-hangzhou"}}
     schema = pa.schema([("a", pa.int64())])
@@ -63,7 +63,7 @@ def test_m8_generator_dispatch(monkeypatch):
         def __init__(self, base_url=None, api_key=None): captured["base_url"] = base_url
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
 
-    from online.m8_pref.generate import MockLLM, VLLMClient, make_llm
+    from dataloop.online.m8_pref.generate import MockLLM, VLLMClient, make_llm
     assert isinstance(make_llm({"m8_pref": {"generator": "mock"}}, "x"), MockLLM)
     cfg = {"m8_pref": {"generator": "vllm", "generator_endpoint": "http://vllm/v1", "models": {"current_model": "c"}}}
     llm = make_llm(cfg, "current_model")
@@ -81,7 +81,7 @@ def test_m4_embedding_dispatch(monkeypatch):
         def __init__(self, base_url=None, api_key=None): self.embeddings = FakeEmb()
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
 
-    from offline.m4_quality.embedding import embed_texts
+    from dataloop.offline.m4_quality.embedding import embed_texts
     cfg = {"m4_quality": {"embedding": "bge-zh", "embedding_endpoint": "http://bge/v1", "embedding_dim": 2}}
     out = embed_texts(cfg, ["ab", "abcd"])
     assert out.shape == (2, 2) and np.allclose(np.linalg.norm(out, axis=1), 1.0)

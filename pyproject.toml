@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# cluster profile 额外依赖 (Ray 分布式 / Paimon / Postgres / 模型客户端 / 对象存储),
+# cluster profile 额外依赖 (Ray 分布式 / Postgres / 模型客户端 / 对象存储),
 # 不随 mini 默认安装: uv sync --extra cluster (GPU 节点上再装 vllm/fasttext)
 cluster = [
     "ray",                  # Daft Ray runner
@@ -33,16 +33,23 @@ cluster = [
     "fsspec",               # 对象存储 (corpus shard 文本)
     "s3fs",
 ]
+# Streamlit 数据探索 app (SVG 流程图无需此依赖): uv sync --extra viz
+viz = ["streamlit>=1.30", "pandas>=2"]
 
 [dependency-groups]
 dev = ["pytest>=7"]
 
 [project.scripts]
-dataloop-registry = "registry.cli:main"
-dataloop-mini = "scripts.run_mini:main"
+dataloop-registry = "dataloop.registry.cli:main"
+dataloop-mini = "dataloop.scripts.run_mini:main"
+dataloop-webapp = "dataloop.webapp.server:main"
 
 [tool.setuptools.packages.find]
-include = ["common*", "schemas*", "offline*", "ablation*", "online*", "registry*", "scripts*"]
+where = ["src"]
+include = ["dataloop*"]
+
+[tool.setuptools.package-data]
+"dataloop.webapp" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from common.config import load_profile
+from dataloop.common.config import load_profile
 
 
 @pytest.fixture(scope="session")

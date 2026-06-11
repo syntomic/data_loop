@@ -1,7 +1,7 @@
 import numpy as np
 
-from offline.m4_quality import teacher
-from offline.m4_quality.classifier import Regressor, embed
+from dataloop.offline.m4_quality import teacher
+from dataloop.offline.m4_quality.classifier import Regressor, embed
 
 
 def test_teacher_orders_quality():

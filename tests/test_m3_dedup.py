@@ -1,4 +1,4 @@
-from offline.m3_dedup.minhash import _params, lsh_bands, shingles, signature
+from dataloop.offline.m3_dedup.minhash import _params, lsh_bands, shingles, signature
 
 A = "等差数列的求和方法。首先定义首项与公差,其次推导前n项和的公式,例如首项一公差二时计算前十项的和。" * 4
 B = A + "(转载)"

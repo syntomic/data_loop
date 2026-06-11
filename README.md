@@ -190,9 +190,9 @@ score(reward + safety + embedding)
 - 原子顺序:先写 Lance(拿到 version)再 registry 记录,registry 绝不指向未提交数据。
 
 ```bash
-uv run python -m registry.cli snapshots --id pref-v1      # 列出绑定的物理快照
-uv run python -m registry.cli reproduce  --id pref-v1 --load  # 按快照还原并验证行数
-uv run python -m registry.cli cleanup    --keep-days 7    # 回收未被引用的超龄旧 version
+uv run dataloop-registry snapshots --id pref-v1           # 列出绑定的物理快照
+uv run dataloop-registry reproduce  --id pref-v1 --load   # 按快照还原并验证行数
+uv run dataloop-registry cleanup    --keep-days 7         # 回收未被引用的超龄旧 version
 ```
 
 ---
@@ -216,19 +216,25 @@ mini profile 必须保证全链 9 个模块端到端跑通: 50 WARC → 千条�
 
 ## 8. 仓库结构(代码生成依据)
 
+代码统一收拢在 `src/dataloop/` 包下(标准 src 布局);`configs/`、`docs/`、
+`replay-data/`、`tests/` 留在仓库根。
+
 ```
 data-loop/
-├── configs/                # profiles(mini/cluster)、rubrics、过滤规则、黑名单
-├── schemas/                # 各表 PyArrow/Avro 定义,集中维护
-├── offline/
-│   ├── m1_warc_ingest/  m2_filter/  m3_dedup/  m4_quality/  m5_corpus/
-├── ablation/               # m6: 训练脚本、eval harness、退火评估
-├── online/
-│   ├── m7_flink/           # SQL + DataStream Java/Python 作业
-│   └── m8_pref/            # Daft pipeline: score/sample/generate/judge/qc
-├── registry/                # m9: 版本/血缘/去污染 API + CLI
-├── replay-data/             # 模拟生产事件流样例
-└── tests/                   # 每模块 fixture + 端到端 mini run
+├── pyproject.toml  uv.lock      # 入口脚本: dataloop-mini / -registry / -webapp
+├── configs/                     # profiles(mini/cluster)、rubrics、过滤规则、黑名单
+├── docs/                        # 设计文档 (如 Lance↔registry 版本结合)
+├── replay-data/                 # 模拟 WARC 与生产事件流样例
+├── tests/                       # 每模块 fixture + 端到端 mini run
+└── src/dataloop/
+    ├── common/                  # 配置、Lake 存储抽象、Lance IO
+    ├── schemas/                 # 各表 PyArrow 定义,集中维护
+    ├── offline/                 # m1_warc_ingest · m2_filter · m3_dedup · m4_quality · m5_corpus
+    ├── ablation/                # m6: eval harness、退火评估
+    ├── online/                  # m7_flink(DataStream)· m8_pref(score/sample/generate/judge/qc)
+    ├── registry/                # m9: 版本/血缘/去污染/快照绑定 API + CLI
+    ├── scripts/                 # 全链 run_mini
+    └── webapp/                  # 可视化: SVG 流程图 + Streamlit explorer (共用 data.py)
 ```
 
 ## 9. 实施里程碑
@@ -269,18 +275,19 @@ resiliparse**,M7 用 **Flink MiniCluster**(从文件 replay 源读事件)。仅 
 uv sync                       # 创建 .venv 并按 uv.lock 安装 (含 daft/lance/flink/trafilatura)
 
 # 全链 9 模块端到端 (自动生成模拟 WARC + 事件流): 30 文档 → 双层语料 → 偏好集
-uv run python scripts/run_mini.py
+uv run dataloop-mini
 
 # 单元 + 端到端测试 (含 M7 Flink↔replay 输出一致性校验)
 uv run pytest -q
 
 # registry 查询 (版本 / 消融报告 / 血缘反查)
-uv run python -m registry.cli versions
-uv run python -m registry.cli ablations
-uv run python -m registry.cli trace --kind pair --id <pair_id>
+uv run dataloop-registry versions
+uv run dataloop-registry ablations
+uv run dataloop-registry trace --kind pair --id <pair_id>
 
-# 可视化 Demo (浏览器看数据流转, 详见 webapp/README.md)
-uv run python -m webapp.server          # http://127.0.0.1:8000
+# 可视化 (详见 src/dataloop/webapp/README.md)
+uv run dataloop-webapp                          # SVG 流程图: http://127.0.0.1:8000
+uv run --extra viz streamlit run src/dataloop/webapp/explorer.py  # Streamlit 数据探索
 ```
 
 > M7 默认后端是 Flink MiniCluster(`configs/mini.yaml` 的
@@ -299,8 +306,8 @@ uv sync --extra cluster            # 装 ray / psycopg / openai / s3fs
 # GPU 节点上另装: uv pip install vllm fasttext-wheel
 
 # 离线管线 (Daft Ray runner, 读 s3 WARC, 写 Lance on S3, 注册进 Postgres)
-uv run python -c "from common.config import load_profile; from offline.m1_warc_ingest import ingest; ingest.run(load_profile('configs/cluster.yaml'))"
-# M2–M8 同理传 configs/cluster.yaml; 或整链: uv run python scripts/run_mini.py configs/cluster.yaml
+uv run python -c "from dataloop.common.config import load_profile; from dataloop.offline.m1_warc_ingest import ingest; ingest.run(load_profile('configs/cluster.yaml'))"
+# M2–M8 同理传 configs/cluster.yaml; 或整链: uv run dataloop-mini configs/cluster.yaml
 ```
 
 `configs/cluster.yaml` 与 `configs/mini.yaml` 字段一一对应,切换点全部是配置项:

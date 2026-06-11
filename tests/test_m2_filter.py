@@ -1,5 +1,5 @@
-from offline.m2_filter.langid import detect
-from offline.m2_filter.rules import evaluate
+from dataloop.offline.m2_filter.langid import detect
+from dataloop.offline.m2_filter.rules import evaluate
 
 RULES = {"min_chars": 200, "max_chars": 100000, "max_symbol_ratio": 0.25,
          "max_digit_ratio": 0.3, "max_dup_line_ratio": 0.3, "max_dup_2gram_ratio": 0.2,

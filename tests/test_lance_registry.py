@@ -3,8 +3,8 @@ import lance
 import pyarrow as pa
 import pytest
 
-from common.lake import Lake, Snapshot, sanitize_tag
-from registry.db import Registry
+from dataloop.common.lake import Lake, Snapshot, sanitize_tag
+from dataloop.registry.db import Registry
 
 SCHEMA = pa.schema([("a", pa.int64()), ("b", pa.string())])
 

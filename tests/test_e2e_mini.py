@@ -5,26 +5,26 @@ import sys
 
 import pytest
 
-from common.config import resolve
-from common.lake import Lake
-from registry.db import Registry
+from dataloop.common.config import resolve
+from dataloop.common.lake import Lake
+from dataloop.registry.db import Registry
 
 
 @pytest.fixture(scope="module")
 def pipeline(cfg):
     shutil.rmtree(resolve(cfg, cfg["data_root"]), ignore_errors=True)
     subprocess.run([sys.executable, str(resolve(cfg, "replay-data/generate.py"))], check=True)
-    from offline.m1_warc_ingest import ingest
-    from offline.m2_filter import filter as m2
-    from offline.m3_dedup import dedup
-    from offline.m4_quality import score as m4
-    from offline.m5_corpus import build as m5
-    from ablation import run as m6
+    from dataloop.offline.m1_warc_ingest import ingest
+    from dataloop.offline.m2_filter import filter as m2
+    from dataloop.offline.m3_dedup import dedup
+    from dataloop.offline.m4_quality import score as m4
+    from dataloop.offline.m5_corpus import build as m5
+    from dataloop.ablation import run as m6
     if cfg["m7_signal_ingest"].get("backend") == "flink":
-        from online.m7_flink import job_flink as m7
+        from dataloop.online.m7_flink import job_flink as m7
     else:
-        from online.m7_flink import job as m7
-    from online.m8_pref import pipeline as m8
+        from dataloop.online.m7_flink import job as m7
+    from dataloop.online.m8_pref import pipeline as m8
     ingest.run(cfg), m2.run(cfg), dedup.run(cfg), m4.run(cfg)
     manifests = m5.run(cfg)
     report = m6.run(cfg)

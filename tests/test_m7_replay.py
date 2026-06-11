@@ -3,10 +3,10 @@ import json
 
 import pytest
 
-from common.config import resolve
-from common.lake import Lake
-from online.m7_flink import job
-from online.m7_flink.pii import scrub
+from dataloop.common.config import resolve
+from dataloop.common.lake import Lake
+from dataloop.online.m7_flink import job
+from dataloop.online.m7_flink.pii import scrub
 
 
 @pytest.fixture(scope="module")
