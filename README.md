@@ -227,29 +227,68 @@ data-loop/
 
 ---
 
-## 11. 快速开始 (mini profile)
+## 11. 运行方式
+
+两套 profile 共用同一份代码与表 schema,只通过配置文件切换后端实现:
+本地用 `configs/mini.yaml`(默认),集群用 `configs/cluster.yaml`。
+
+### 11.1 本地运行 (mini profile, 默认)
+
+单机即可全链跑通(64GB 内存即可,无需 GPU/JVM/Kafka)。所有外部模型组件
+(fastText langid / trafilatura / BGE-zh / vLLM / 教师与裁判模型)走可插拔
+适配层,默认用确定性的纯 Python mock;数据落地为本地 Parquet 分区目录
+(`data/`),registry 用 SQLite(`data/registry.sqlite`)。
 
 ```bash
 uv sync                       # 创建 .venv 并按 uv.lock 安装 (dev 组默认包含)
 
-# 全链 9 模块端到端 (自动生成模拟 WARC + 事件流)
+# 全链 9 模块端到端 (自动生成模拟 WARC + 事件流): 30 文档 → 双层语料 → 偏好集
 uv run python scripts/run_mini.py
 
 # 单元 + 端到端测试
 uv run pytest -q
 
-# M7 用 PyFlink MiniCluster 跑 (默认纯 Python replay, 两后端输出逐行一致)
-uv sync --extra flink         # 需 Java 17+
-# configs/mini.yaml: m7_signal_ingest.backend: flink
-uv run pytest -q tests/test_m7_flink.py   # 一致性校验
+# M7 默认是纯 Python 文件 replay; 可切到 PyFlink MiniCluster (需 Java 17+):
+uv sync --extra flink
+# 把 configs/mini.yaml 的 m7_signal_ingest.backend 改为 flink, 再跑 run_mini
+uv run pytest -q tests/test_m7_flink.py   # 两后端输出逐行一致校验
 
-# registry 查询
+# registry 查询 (版本 / 消融报告 / 血缘反查)
 uv run python -m registry.cli versions
 uv run python -m registry.cli ablations
 uv run python -m registry.cli trace --kind pair --id <pair_id>
 ```
 
-mini profile 的外部模型组件(fastText langid / trafilatura / BGE-zh / vLLM /
-教师与裁判模型)全部走可插拔适配层,默认用确定性的纯 Python mock,接口与
-cluster profile 对齐;切到 cluster 只需替换 `configs/cluster.yaml` 中的后端
-并安装重型依赖 `uv pip install daft trafilatura fasttext-wheel vllm`(不入 lock)。
+### 11.2 集群运行 (cluster profile)
+
+所有命令换成 `--profile configs/cluster.yaml`,模块代码不变,逐组件切真实后端:
+
+| 组件 | mini 后端 | cluster 后端 | 切换点 |
+|---|---|---|---|
+| 计算引擎 | 单进程 Python | Daft Ray runner | 各模块 `run(cfg)` 内的执行层 |
+| 存储 | 本地 Parquet 目录 | Paimon on OSS/S3 | `data_root: s3://...` |
+| M1 抽取 | 内置正则 | trafilatura + resiliparse | `m1_warc_ingest.extractor` |
+| M2 语种 | CJK 启发式 | fastText lid.176 | `m2_filter.langid` |
+| M4 教师/嵌入 | 启发式 / hashing | 强模型 API / BGE-zh | `m4_quality.teacher/embedding` |
+| M7 流 | 文件 replay 或 MiniCluster | Flink on K8s + Kafka | `m7_signal_ingest.kafka` |
+| M8 生成/裁判 | 确定性 mock | vLLM GPU 节点 | `m8_pref.generator/judge` |
+| registry | SQLite | Postgres | `registry_db: postgresql://...` |
+
+部署顺序(里程碑 P1–P6 对应):
+
+```bash
+# 0) 重型依赖不入 uv.lock, 在集群镜像里按需安装
+uv pip install daft trafilatura fasttext-wheel vllm
+
+# 1) 离线管线: Daft Ray runner 提交 M1–M5 (warc_glob 指向 CC dump 清单)
+uv run python -c "from common.config import load_profile; from offline.m1_warc_ingest import ingest; ingest.run(load_profile('configs/cluster.yaml'))"
+# M2–M5 同理; corpus manifest 自动注册进 Postgres registry
+
+# 2) 在线管线: M7 作业以相同语义提交 Flink on K8s (Kafka 两 topic 接生产事件);
+#    M8 按日批调度, judge/generate 指向 vLLM 服务
+# 3) M6 消融在训练集群跑 0.2B/5B token, 报告写回 registry
+```
+
+注意:cluster profile 当前是接口占位——配置与适配层接口已对齐,
+但 Daft/Ray 执行层、Paimon writer、K8s/Kafka 作业部署清单尚未实现,
+属里程碑 P1–P6 的集群化部分。
