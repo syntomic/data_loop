@@ -17,6 +17,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
       - name: Sync (locked)
         run: uv sync --frozen --dev --python 3.11
       - name: Tests

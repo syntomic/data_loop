@@ -1,12 +1,15 @@
 # mini profile: 单机端到端 (README §7)
+# 计算: Daft native runner; 存储: Lance 数据集; 流: Flink MiniCluster
 profile: mini
-data_root: data            # 所有湖表落在 <repo>/data 下的 Parquet 分区目录
+runner: native             # Daft 单机 runner (cluster 切 ray)
+storage: lance             # Lance 数据集 (cluster 切 paimon)
+data_root: data            # 所有湖表落在 <repo>/data 下的 Lance dataset 目录
 registry_db: data/registry.sqlite
 
 m1_warc_ingest:
   warc_glob: "replay-data/warc/*.warc.gz"
   dump_id: CC-MAIN-2026-18
-  extractor: simple        # mini 用内置正则抽取器; cluster 用 trafilatura+resiliparse
+  extractor: trafilatura    # trafilatura(favor_precision) + resiliparse fallback
 
 m2_filter:
   rules_file: configs/filter_rules.yaml
@@ -41,7 +44,7 @@ m6_ablation:
   seed: 42
 
 m7_signal_ingest:
-  backend: replay          # replay | flink (PyFlink MiniCluster, 语义一致, 见 job_flink.py)
+  backend: flink           # Flink MiniCluster (本地); replay 后端仅留作一致性校验
   message_events: replay-data/message_events.jsonl
   feedback_events: replay-data/feedback_events.jsonl
   consent_table: replay-data/consent.jsonl

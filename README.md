@@ -50,7 +50,7 @@
 
 | 模块 | 名称 | 技术栈 | 产出 |
 |---|---|---|---|
-| M1 | warc-ingest | Daft, warcio, trafilatura | 抽取后文档表 |
+| M1 | warc-ingest | Daft, warcio, trafilatura + resiliparse | 抽取后文档表 |
 | M2 | filter | Daft, fastText, 规则集 | 过滤后文档表 |
 | M3 | dedup | Daft, MinHash LSH | 去重后文档表 |
 | M4 | quality | Daft, BGE-zh + 回归头 | 带质量分文档表 |
@@ -60,7 +60,7 @@
 | M8 | pref-build | Daft, vLLM, judge | PreferencePair 数据集 |
 | M9 | registry | 元数据库 (SQLite/PG) | 版本、血缘、去污染记录 |
 
-数据层统一为 Lakehouse(本地 mini profile 用 Parquet 目录模拟分区表;集群 profile 用 Paimon)。
+数据层统一为 Lakehouse(本地 mini profile 用 Lance 数据集;集群 profile 用 Paimon)。
 
 ---
 ## 3. 离线管线设计 (M1–M5)
@@ -180,12 +180,17 @@ score(reward + safety + embedding)
 
 ## 7. 技术选型与运行 profile
 
+两套 profile 共用同一份模块代码、表 schema 与存储/计算抽象,差异仅在后端实现:
+mini 与 cluster 的计算引擎都是 Daft、流都是 Flink、抽取都是 trafilatura+resiliparse,
+只是单机 vs 分布式的部署不同。
+
 | 维度 | mini profile(本地,默认) | cluster profile |
 |---|---|---|
 | 计算 | Daft 单机 (native runner) | Daft Ray runner |
-| 流 | Flink MiniCluster + 文件 replay | Flink on K8s + Kafka |
-| 存储 | 本地 Parquet 分区目录 | Paimon on OSS/S3 |
-| 推理 | vLLM(Metal 受限,小模型或外部 API)| vLLM GPU 节点 |
+| 流 | Flink MiniCluster + 文件 replay 源 | Flink on K8s + Kafka |
+| 存储 | 本地 Lance 数据集 | Paimon on OSS/S3 |
+| 抽取 | trafilatura + resiliparse | trafilatura + resiliparse |
+| 推理 | vLLM / 外部 API 适配层(小模型或 mock)| vLLM GPU 节点 |
 | registry | SQLite | Postgres |
 
 mini profile 必须保证全链 9 个模块端到端跑通: 50 WARC → 千条偏好对。
@@ -234,24 +239,21 @@ data-loop/
 
 ### 11.1 本地运行 (mini profile, 默认)
 
-单机即可全链跑通(64GB 内存即可,无需 GPU/JVM/Kafka)。所有外部模型组件
-(fastText langid / trafilatura / BGE-zh / vLLM / 教师与裁判模型)走可插拔
-适配层,默认用确定性的纯 Python mock;数据落地为本地 Parquet 分区目录
-(`data/`),registry 用 SQLite(`data/registry.sqlite`)。
+单机即可全链跑通(64GB 内存即可,无需 GPU/Kafka,需 **Java 17+** 跑 Flink
+MiniCluster)。后端与集群同构:计算用 **Daft 单机 native runner**,存储用
+**Lance 数据集**(`data/` 下每张表一个 dataset),抽取用 **trafilatura +
+resiliparse**,M7 用 **Flink MiniCluster**(从文件 replay 源读事件)。仅 GPU
+密集的模型组件(fastText langid / BGE-zh / vLLM 教师与裁判)在 mini 走可插拔
+适配层的确定性 mock;registry 用 SQLite(`data/registry.sqlite`)。
 
 ```bash
-uv sync                       # 创建 .venv 并按 uv.lock 安装 (dev 组默认包含)
+uv sync                       # 创建 .venv 并按 uv.lock 安装 (含 daft/lance/flink/trafilatura)
 
 # 全链 9 模块端到端 (自动生成模拟 WARC + 事件流): 30 文档 → 双层语料 → 偏好集
 uv run python scripts/run_mini.py
 
-# 单元 + 端到端测试
+# 单元 + 端到端测试 (含 M7 Flink↔replay 输出一致性校验)
 uv run pytest -q
-
-# M7 默认是纯 Python 文件 replay; 可切到 PyFlink MiniCluster (需 Java 17+):
-uv sync --extra flink
-# 把 configs/mini.yaml 的 m7_signal_ingest.backend 改为 flink, 再跑 run_mini
-uv run pytest -q tests/test_m7_flink.py   # 两后端输出逐行一致校验
 
 # registry 查询 (版本 / 消融报告 / 血缘反查)
 uv run python -m registry.cli versions
@@ -259,26 +261,32 @@ uv run python -m registry.cli ablations
 uv run python -m registry.cli trace --kind pair --id <pair_id>
 ```
 
+> M7 默认后端是 Flink MiniCluster(`configs/mini.yaml` 的
+> `m7_signal_ingest.backend: flink`)。仓库保留了纯 Python `replay` 后端,
+> 仅用于 `tests/test_m7_flink.py` 校验两者输出逐行一致;切回它把 backend 改成
+> `replay` 即可(无需 JVM)。
+
 ### 11.2 集群运行 (cluster profile)
 
-所有命令换成 `--profile configs/cluster.yaml`,模块代码不变,逐组件切真实后端:
+所有命令换成 `--profile configs/cluster.yaml`,模块代码、存储/计算抽象与
+抽取器都不变,只把单机后端换成分布式后端:
 
 | 组件 | mini 后端 | cluster 后端 | 切换点 |
 |---|---|---|---|
-| 计算引擎 | 单进程 Python | Daft Ray runner | 各模块 `run(cfg)` 内的执行层 |
-| 存储 | 本地 Parquet 目录 | Paimon on OSS/S3 | `data_root: s3://...` |
-| M1 抽取 | 内置正则 | trafilatura + resiliparse | `m1_warc_ingest.extractor` |
+| 计算引擎 | Daft native runner | Daft Ray runner | `runner: ray` |
+| 存储 | 本地 Lance 数据集 | Paimon on OSS/S3 | `storage` / `data_root: s3://...` |
+| M1 抽取 | trafilatura + resiliparse | trafilatura + resiliparse | (同构,不变) |
 | M2 语种 | CJK 启发式 | fastText lid.176 | `m2_filter.langid` |
 | M4 教师/嵌入 | 启发式 / hashing | 强模型 API / BGE-zh | `m4_quality.teacher/embedding` |
-| M7 流 | 文件 replay 或 MiniCluster | Flink on K8s + Kafka | `m7_signal_ingest.kafka` |
+| M7 流 | Flink MiniCluster + 文件 replay 源 | Flink on K8s + Kafka | `m7_signal_ingest.kafka` |
 | M8 生成/裁判 | 确定性 mock | vLLM GPU 节点 | `m8_pref.generator/judge` |
 | registry | SQLite | Postgres | `registry_db: postgresql://...` |
 
 部署顺序(里程碑 P1–P6 对应):
 
 ```bash
-# 0) 重型依赖不入 uv.lock, 在集群镜像里按需安装
-uv pip install daft trafilatura fasttext-wheel vllm
+# 0) GPU 密集的分布式额外依赖 (Ray/fastText/vLLM) 不随 mini 默认安装
+uv pip install ray fasttext-wheel vllm
 
 # 1) 离线管线: Daft Ray runner 提交 M1–M5 (warc_glob 指向 CC dump 清单)
 uv run python -c "from common.config import load_profile; from offline.m1_warc_ingest import ingest; ingest.run(load_profile('configs/cluster.yaml'))"
@@ -289,6 +297,6 @@ uv run python -c "from common.config import load_profile; from offline.m1_warc_i
 # 3) M6 消融在训练集群跑 0.2B/5B token, 报告写回 registry
 ```
 
-注意:cluster profile 当前是接口占位——配置与适配层接口已对齐,
-但 Daft/Ray 执行层、Paimon writer、K8s/Kafka 作业部署清单尚未实现,
-属里程碑 P1–P6 的集群化部分。
+注意:cluster profile 当前是接口占位——配置与后端接口已对齐(计算/存储/流/抽取
+在两 profile 同构),但 Ray runner 提交、Paimon writer、Flink on K8s + Kafka 部署
+清单、Postgres registry 尚未接线,属里程碑 P1–P6 的集群化部分。

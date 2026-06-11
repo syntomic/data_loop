@@ -1,6 +1,8 @@
 # cluster profile: 占位配置, 接口与 mini 对齐 (README §7)
 profile: cluster
-data_root: s3://data-loop/lake     # Paimon on OSS/S3
+runner: ray                        # Daft Ray runner (分布式)
+storage: paimon                    # Paimon on OSS/S3
+data_root: s3://data-loop/lake
 registry_db: postgresql://registry
 
 m1_warc_ingest: {warc_glob: "s3://cc/CC-MAIN-2026-18/*.warc.gz", dump_id: CC-MAIN-2026-18, extractor: trafilatura}

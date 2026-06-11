@@ -8,16 +8,24 @@ version = "0.1.0"
 description = "LLM 训练数据闭环平台 (offline + online + loop infra), mini profile"
 requires-python = ">=3.10"
 dependencies = [
-    "pyarrow>=14",
     "numpy>=1.24",
     "PyYAML>=6",
     "warcio>=1.7",
+    # mini profile 核心后端: Daft 单机计算 + Lance 存储 + trafilatura/resiliparse 抽取
+    "daft>=0.7",
+    "daft-lance>=0.1",
+    "pylance>=7",
+    "trafilatura>=1.8",
+    "resiliparse>=0.14",
+    # M7 统一用 Flink (本地 MiniCluster)
+    "apache-flink>=1.20",
+    "cffi",
 ]
 
 [project.optional-dependencies]
-flink = ["apache-flink>=1.20", "cffi"]
-# cluster profile (Daft/Ray, trafilatura, fastText, vLLM) 依赖重且需 GPU,
-# 不进 uv.lock, 按需手动安装: uv pip install daft trafilatura fasttext-wheel vllm
+# cluster profile 额外的重型依赖 (Ray 分布式 / fastText / vLLM, 需 GPU),
+# 不随 mini 默认安装: uv pip install ray fasttext-wheel vllm
+cluster = ["ray", "fasttext-wheel", "vllm"]
 
 [dependency-groups]
 dev = ["pytest>=7"]

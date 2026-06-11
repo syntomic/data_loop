@@ -17,14 +17,19 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"        # M7 Flink MiniCluster 需 JVM
       - name: Sync (locked)
         run: uv sync --frozen --dev --python ${{ matrix.python-version }}
       - name: Unit + e2e tests
         run: uv run pytest -q
 
-  flink-parity:
-    # M7 PyFlink 后端与 replay 后端输出一致性 (依赖较重, 单独 job)
+  mini-pipeline:
+    # README §7 验收: mini 全链 9 模块 (Daft 单机 + Lance + Flink MiniCluster) 端到端
     runs-on: ubuntu-latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -34,20 +39,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Sync with flink extra
-        run: uv sync --frozen --dev --extra flink --python 3.11
-      - name: Parity test
-        run: uv run pytest -q tests/test_m7_flink.py
-
-  mini-pipeline:
-    # README §7 验收: mini profile 全链 9 模块端到端跑通
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
       - name: Sync (locked)
         run: uv sync --frozen --python 3.11
       - name: Run mini pipeline (M1–M9)
